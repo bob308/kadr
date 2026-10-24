@@ -555,9 +555,13 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                     Text("${if (landscape) "16:9" else "9:16"} · $fps", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold, lineHeight = 10.sp)
                 }
                 Spacer(Modifier.width(10.dp))
-                Text(timecode(elapsed), color = if (recording != null && !paused) RecRed else Color.White,
-                    fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
+                val isRec = recording != null
+                Text(timecode(elapsed), color = Color.White,
+                    fontSize = if (isRec) 20.sp else 24.sp, fontWeight = FontWeight.Bold,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                    modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                        .background(if (isRec) (if (paused) Color(0xFF6B6F78) else RecCoral) else Color.Transparent)
+                        .padding(horizontal = if (isRec) 16.dp else 0.dp, vertical = 4.dp))
                 Spacer(Modifier.weight(1f))
                 IconTap(KIcons.Gallery, onClick = { if (recording == null) sheet = Sheet.MEDIA })
             }
@@ -681,16 +685,19 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     }
 
     val toolbar: @Composable (Boolean) -> Unit = { vertical ->
-        val items: List<@Composable () -> Unit> = listOf(
-            {
-                val rec = recording
-                if (rec != null) IconTap(if (paused) KIcons.Play else KIcons.Pause, active = paused, hint = "Пауза запису", onHint = ::showHint) {
-                    if (paused) { rec.resume(); scrolling = true } else { rec.pause(); scrolling = false }
-                } else IconTap(KIcons.Script, active = drawer == Drawer.SCRIPT, hint = "Сценарій", onHint = ::showHint) { toggleDrawer(Drawer.SCRIPT) }
-            },
+        val rec = recording
+        val items: List<@Composable () -> Unit> = if (rec != null) listOf(
+            // While recording: only what is needed, like the phone's own camera.
             { IconTap(KIcons.Speed, active = drawer == Drawer.SPEED, hint = "Швидкість і пуск тексту", onHint = ::showHint) { toggleDrawer(Drawer.SPEED) } },
             { TextTap("Aa", active = drawer == Drawer.FONT, hint = "Шрифт і панель тексту", onHint = ::showHint) { toggleDrawer(Drawer.FONT) } },
-            { RecordButton(recording != null, paused, countdown > 0, granted) { onRecordPressed() } },
+            { PauseButton(paused) { if (paused) { rec.resume(); scrolling = true } else { rec.pause(); scrolling = false } } },
+            { StopButton { onRecordPressed() } },
+            { IconTap(if (textHidden) KIcons.EyeOff else KIcons.Eye, active = textHidden, hint = "Сховати текст", onHint = ::showHint) { textHidden = !textHidden } },
+        ) else listOf(
+            { IconTap(KIcons.Script, active = drawer == Drawer.SCRIPT, hint = "Сценарій", onHint = ::showHint) { toggleDrawer(Drawer.SCRIPT) } },
+            { IconTap(KIcons.Speed, active = drawer == Drawer.SPEED, hint = "Швидкість і пуск тексту", onHint = ::showHint) { toggleDrawer(Drawer.SPEED) } },
+            { TextTap("Aa", active = drawer == Drawer.FONT, hint = "Шрифт і панель тексту", onHint = ::showHint) { toggleDrawer(Drawer.FONT) } },
+            { RecordButton(countdown > 0, granted) { onRecordPressed() } },
             { IconTap(KIcons.Flip, active = drawer == Drawer.CAMERA, hint = "Камера, орієнтація, якість", onHint = ::showHint) { toggleDrawer(Drawer.CAMERA) } },
             { IconTap(KIcons.Timer, active = drawer == Drawer.TIMER || delaySec > 0, hint = "Відлік перед записом", onHint = ::showHint) { toggleDrawer(Drawer.TIMER) } },
             { IconTap(KIcons.More, active = drawer == Drawer.MORE, hint = "Сітка, рівень, пульт, налаштування", onHint = ::showHint) { toggleDrawer(Drawer.MORE) } },
@@ -794,18 +801,34 @@ private fun TextTap(label: String, active: Boolean, hint: String, onHint: (Strin
     }
 }
 
-/**
- * Not recording: white disc with a small red dot. Recording: one big red disc.
- * Paused: the big disc dims. Counting down: the dot grows halfway.
- */
+private val RecCoral = Color(0xFFFF6B52)
+
+/** White disc with a red dot, as in the phone's camera. During the countdown the dot pulses larger. */
 @Composable
-private fun RecordButton(recording: Boolean, paused: Boolean, counting: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val dot by androidx.compose.animation.core.animateDpAsState(
-        when { recording -> 72.dp; counting -> 40.dp; else -> 24.dp }, label = "rec")
-    Box(Modifier.size(72.dp).clip(CircleShape)
-        .background(if (recording) Color.Transparent else Color.White)
+private fun RecordButton(counting: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val dot by androidx.compose.animation.core.animateDpAsState(if (counting) 44.dp else 30.dp, label = "rec")
+    Box(Modifier.size(76.dp).clip(CircleShape).background(Color(0xFFFAF8F5))
         .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(dot).clip(CircleShape).background(if (recording && paused) RecRed.copy(alpha = 0.45f) else RecRed))
+        Box(Modifier.size(dot).clip(CircleShape).background(RecCoral))
+    }
+}
+
+/** Two white bars to pause; a red dot to continue. */
+@Composable
+private fun PauseButton(paused: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(60.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        if (paused) Box(Modifier.size(30.dp).clip(CircleShape).background(RecCoral))
+        else Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            repeat(2) { Box(Modifier.size(11.dp, 34.dp).clip(RoundedCornerShape(5.dp)).background(Color.White)) }
+        }
+    }
+}
+
+/** White rounded square ends the recording. */
+@Composable
+private fun StopButton(onClick: () -> Unit) {
+    Box(Modifier.size(60.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(RoundedCornerShape(7.dp)).background(Color.White))
     }
 }
 
