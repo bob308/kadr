@@ -24,7 +24,20 @@ jobs:
           gradle-version: 8.11.1
 
       - name: Build
-        run: gradle assembleRelease --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --console=plain 2>&1 | tee build.log
+
+      # When the build fails, keep the log on the ci-log branch so it can be read back.
+      - name: Save build log
+        if: failure()
+        run: |
+          git config user.name "ci"; git config user.email "ci@users.noreply.github.com"
+          git checkout --orphan ci-log
+          git rm -rf --cached . > /dev/null
+          git add -f build.log
+          git commit -m "build log ${{ github.run_number }}"
+          git push -f origin ci-log
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk Kadr.apk
