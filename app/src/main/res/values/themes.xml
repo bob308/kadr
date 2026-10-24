@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Kadr" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ink</item>
+        <item name="android:statusBarColor">@color/ink</item>
+        <item name="android:navigationBarColor">@color/ink</item>
+    </style>
+    <color name="ink">#FF12141B</color>
+    <color name="red">#FFFF4B4B</color>
+    <color name="yellow">#FFFFD43B</color>
+</resources>

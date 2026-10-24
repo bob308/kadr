@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Viewfinder corners, a record dot and two caption bars. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M30,40 L30,30 L40,30 M68,30 L78,30 L78,40 M78,68 L78,78 L68,78 M40,78 L30,78 L30,68" />
+    <path android:fillColor="#FFFF4B4B"
+        android:pathData="M54,42 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0" />
+    <path android:fillColor="#FFFFD43B"
+        android:pathData="M38,60 h32 a3,3 0 0 1 0,6 h-32 a3,3 0 0 1 0,-6 z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M44,69 h20 a2.5,2.5 0 0 1 0,5 h-20 a2.5,2.5 0 0 1 0,-5 z" />
+</vector>
