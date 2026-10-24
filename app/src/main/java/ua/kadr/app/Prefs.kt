@@ -16,6 +16,13 @@ enum class PanelPos(val label: String) { TOP("Вгорі"), CENTER("По цен�
 class Prefs(context: Context) {
     private val p = context.getSharedPreferences("kadr", Context.MODE_PRIVATE)
 
+    init {
+        // Version 1.6.3 makes 24 the standard text size; apply it once, later changes stay.
+        if (!p.contains("font_24_applied")) {
+            p.edit().putFloat("font", 24f).putFloat("ov_font", 24f).putBoolean("font_24_applied", true).apply()
+        }
+    }
+
     /** All saved scripts. The single text from version 1.0 becomes the first script. */
     var scripts: List<Script>
         get() {
@@ -60,7 +67,7 @@ class Prefs(context: Context) {
         set(v) = p.edit().putBoolean("level", v).apply()
 
     var overlayFont: Float
-        get() = p.getFloat("ov_font", 26f)
+        get() = p.getFloat("ov_font", 24f)
         set(v) = p.edit().putFloat("ov_font", v).apply()
     var overlayAlpha: Int
         get() = p.getInt("ov_alpha", 1)
@@ -100,7 +107,7 @@ class Prefs(context: Context) {
         set(v) = p.edit().putFloat("speed", v).apply()
 
     var fontSize: Float
-        get() = p.getFloat("font", 30f)
+        get() = p.getFloat("font", 24f)
         set(v) = p.edit().putFloat("font", v).apply()
 
     var mirror: Boolean
