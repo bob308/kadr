@@ -37,7 +37,33 @@ class SubtitleViewModel(app: Application) : AndroidViewModel(app) {
     var lang by mutableStateOf(prefs.lang)
     var style by mutableStateOf(prefs.captionStyle)
     private var words: List<Word> = emptyList()
+    private var heardWords: List<Word> = emptyList()
     val cues = mutableStateListOf<Cue>()
+
+    /** Script the video was recorded with; recognised text is checked against it automatically. */
+    var pendingScriptId: Long? = null
+    /** Message about the script check, shown above the subtitle list. */
+    var scriptNote by mutableStateOf<String?>(null); private set
+    var scriptApplied by mutableStateOf(false); private set
+
+    fun scripts(): List<Script> = prefs.scripts
+
+    /** Replaces recognised words with the script's spelling and punctuation. */
+    fun applyScript(script: Script) {
+        val fixed = TextMatch.alignToScript(heardWords, script.text)
+        if (fixed == null) {
+            scriptNote = "Текст у відео майже не збігається зі сценарієм «${script.title}», тому залишено розпізнаний текст."
+            return
+        }
+        words = fixed; scriptApplied = true
+        cues.clear(); cues += CueBuilder.build(fixed, style.maxWords)
+        scriptNote = "Текст звірено зі сценарієм «${script.title}»"
+    }
+
+    fun undoScript() {
+        words = heardWords; scriptApplied = false; scriptNote = null
+        cues.clear(); cues += CueBuilder.build(heardWords, style.maxWords)
+    }
 
     fun updateStyle(s: CaptionStyle) {
         val regroup = s.maxWords != style.maxWords
@@ -47,10 +73,11 @@ class SubtitleViewModel(app: Application) : AndroidViewModel(app) {
 
     fun chooseLang(l: SpeechLang) { lang = l; prefs.lang = l }
 
-    fun setVideo(uri: Uri) {
+    fun setVideo(uri: Uri, scriptId: Long? = null) {
         job?.cancel()
         videoUri = uri
-        words = emptyList(); cues.clear()
+        pendingScriptId = scriptId
+        words = emptyList(); heardWords = emptyList(); cues.clear(); scriptNote = null; scriptApplied = false
         phase = try { info = VideoProbe.read(getApplication(), uri); Phase.Idle }
         catch (e: Exception) { Phase.Failed("Не вдалося відкрити відео") }
     }
@@ -68,8 +95,9 @@ class SubtitleViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 phase = Phase.Recognising(0f)
                 val w = transcriber.transcribe(uri, lang) { p -> phase = Phase.Recognising(p) }
-                words = w
+                words = w; heardWords = w; scriptApplied = false; scriptNote = null
                 cues.clear(); cues += CueBuilder.build(w, style.maxWords)
+                pendingScriptId?.let { id -> prefs.scripts.firstOrNull { it.id == id }?.let { applyScript(it) } }
                 phase = if (w.isEmpty()) Phase.Failed("Мову не розпізнано. Перевірте, чи є в відео голос і чи правильно вибрана мова.") else Phase.Ready
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

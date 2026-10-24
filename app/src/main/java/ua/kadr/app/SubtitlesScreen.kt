@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -230,6 +232,14 @@ private fun StyleEditor(vm: SubtitleViewModel) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CaptionLook.entries.forEach { l -> FilterChip(selected = s.look == l, onClick = { vm.updateStyle(s.copy(look = l)) }, label = { Text(l.label) }) }
         }
+        Label("Шрифт")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CaptionFont.entries.forEach { f -> FilterChip(selected = s.font == f, onClick = { vm.updateStyle(s.copy(font = f)) }, label = { Text(f.label) }) }
+        }
+        Label("Анімація")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CaptionAnim.entries.forEach { a -> FilterChip(selected = s.anim == a, onClick = { vm.updateStyle(s.copy(anim = a)) }, label = { Text(a.label) }) }
+        }
         Label("Розташування")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CaptionPosition.entries.forEach { p -> FilterChip(selected = s.position == p, onClick = { vm.updateStyle(s.copy(position = p)) }, label = { Text(p.label) }) }
@@ -252,7 +262,19 @@ private fun StyleEditor(vm: SubtitleViewModel) {
 @UnstableApi
 @Composable
 private fun CueList(vm: SubtitleViewModel, onSeek: (Long) -> Unit) {
+    var choosing by remember { mutableStateOf(false) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(vm.scriptNote ?: "Записували за сценарієм? Звірте текст із ним, і помилки розпізнавання виправляться, а розділові знаки стануть як у сценарії.",
+                    color = if (vm.scriptApplied) CapYellow else Muted, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { choosing = true }) { Text(if (vm.scriptApplied) "Інший сценарій" else "Звірити зі сценарієм") }
+                    if (vm.scriptApplied) TextButton(onClick = { vm.undoScript() }) { Text("Скасувати", color = Muted) }
+                }
+            }
+        }
         itemsIndexed(vm.cues, key = { _, c -> "${c.startMs}_${c.endMs}" }) { i, cue ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(formatTime(cue.startMs), color = CapYellow, fontSize = 13.sp,
@@ -262,6 +284,21 @@ private fun CueList(vm: SubtitleViewModel, onSeek: (Long) -> Unit) {
                 TextButton(onClick = { vm.deleteCue(i) }) { Text("✕", color = Muted) }
             }
         }
+    }
+    if (choosing) {
+        AlertDialog(
+            onDismissRequest = { choosing = false },
+            title = { Text("Виберіть сценарій") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(vm.scripts()) { sc ->
+                        Text(sc.title, color = Color.White, modifier = Modifier.fillMaxWidth()
+                            .clickable { vm.applyScript(sc); choosing = false }.padding(vertical = 12.dp))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosing = false }) { Text("Закрити") } },
+        )
     }
 }
 

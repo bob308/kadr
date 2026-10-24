@@ -1,5 +1,6 @@
 package ua.kadr.app
 
+import android.graphics.Typeface
 import java.util.Locale
 
 /** One recognised word with its time in milliseconds. */
@@ -30,6 +31,20 @@ enum class CaptionLook(val label: String) {
     OUTLINE("Контур"), BOX("Плашка"), PLAIN("Тінь")
 }
 
+enum class CaptionFont(val label: String, private val family: String, private val bold: Boolean) {
+    SANS("Звичайний", "sans-serif", true),
+    BLACK("Масивний", "sans-serif-black", false),
+    CONDENSED("Вузький", "sans-serif-condensed", true),
+    SERIF("З засічками", "serif", true),
+    MONO("Моно", "monospace", true);
+
+    fun typeface(): Typeface = Typeface.create(family, if (bold) Typeface.BOLD else Typeface.NORMAL)
+}
+
+enum class CaptionAnim(val label: String) {
+    NONE("Без анімації"), POP("Поява"), WORDS("По словах"), GROW("Збільшення слова")
+}
+
 data class CaptionStyle(
     /** Text height as a share of the video's shorter side. */
     val sizePct: Float = 0.065f,
@@ -40,6 +55,8 @@ data class CaptionStyle(
     val textColor: Int = 0xFFFFFFFF.toInt(),
     val highlightColor: Int = 0xFFFFD43B.toInt(),
     val maxWords: Int = 4,
+    val font: CaptionFont = CaptionFont.SANS,
+    val anim: CaptionAnim = CaptionAnim.NONE,
 )
 
 object CueBuilder {

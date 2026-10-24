@@ -14,6 +14,13 @@ import android.os.Build
 import android.provider.MediaStore
 import android.view.KeyEvent
 import android.view.Surface
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.util.Range
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -130,7 +137,7 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 private fun hasPerms(ctx: Context) = neededPerms
     .all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
-private enum class Sheet { NONE, SCRIPTS, EDIT, SETTINGS }
+private enum class Sheet { NONE, SCRIPTS, SETTINGS }
 
 private val DELAYS = listOf(0, 3, 5, 10, 15)
 
@@ -154,7 +161,6 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     val scripts = remember { mutableStateListOf<Script>().apply { addAll(prefs.scripts) } }
     var currentId by remember { mutableLongStateOf(prefs.currentScriptId.takeIf { id -> scripts.any { it.id == id } } ?: scripts.first().id) }
     val script = scripts.firstOrNull { it.id == currentId }?.text ?: ""
-    fun saveScripts() { prefs.scripts = scripts.toList(); prefs.currentScriptId = currentId }
 
     // Settings
     var speed by remember { mutableFloatStateOf(prefs.speed) }
@@ -168,11 +174,14 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     var panelPos by remember { mutableStateOf(prefs.panelPos) }
     var remoteOn by remember { mutableStateOf(prefs.remote) }
     var lang by remember { mutableStateOf(prefs.lang) }
+    var quality by remember { mutableStateOf(prefs.quality) }
+    var fps by remember { mutableIntStateOf(prefs.fps) }
+    var grid by remember { mutableStateOf(prefs.grid) }
+    var level by remember { mutableStateOf(prefs.level) }
+    var paused by remember { mutableStateOf(false) }
 
     // Session state
     var sheet by remember { mutableStateOf(Sheet.NONE) }
-    var editText by remember { mutableStateOf("") }
-    var editId by remember { mutableLongStateOf(0L) }
     var scrolling by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
     var countdownJob by remember { mutableStateOf<Job?>(null) }
@@ -191,12 +200,12 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     val lineHeightPx = with(density) { (font * 1.35f).sp.toPx() }
 
     val previewView = remember { PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
-    val videoCapture = remember {
-        VideoCapture.withOutput(
-            Recorder.Builder()
-                .setQualitySelector(QualitySelector.from(Quality.FHD, FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)))
-                .build()
-        )
+    val videoCapture = remember(quality, fps) {
+        val q = when (quality) { "HD" -> Quality.HD; "UHD" -> Quality.UHD; else -> Quality.FHD }
+        val recorder = Recorder.Builder()
+            .setQualitySelector(QualitySelector.from(q, FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)))
+            .build()
+        VideoCapture.Builder(recorder).apply { if (fps == 60) setTargetFrameRate(Range(60, 60)) }.build()
     }
 
     // Orientation lock: the video is recorded the same way the screen is turned.
@@ -212,7 +221,7 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         }
     }
 
-    LaunchedEffect(granted, front, isLandscapeNow) {
+    LaunchedEffect(granted, front, isLandscapeNow, videoCapture) {
         if (!granted) return@LaunchedEffect
         try {
             val provider = ctx.cameraProvider()
@@ -224,8 +233,38 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             provider.unbindAll()
             provider.bindToLifecycle(lifecycleOwner, selector, preview, videoCapture)
         } catch (e: Exception) {
-            error = "Не вдалося увімкнути камеру"
+            if (fps == 60) {
+                error = "Ця камера не знімає 60 кадрів на секунду, повернув 30"
+                fps = 30; prefs.fps = 30
+            } else if (quality == "UHD") {
+                error = "Ця камера не знімає 4K, повернув Full HD"
+                quality = "FHD"; prefs.quality = "FHD"
+            } else error = "Не вдалося увімкнути камеру"
         }
+    }
+
+    // ---------- Level: tilt of the phone relative to the screen's "down" ----------
+    var roll by remember { mutableFloatStateOf(0f) }
+    DisposableEffect(level) {
+        val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val acc = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        var gx = 0f; var gy = 9.8f
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                gx = gx * 0.85f + e.values[0] * 0.15f
+                gy = gy * 0.85f + e.values[1] * 0.15f
+                val (sx, sy) = when (previewView.display?.rotation ?: Surface.ROTATION_0) {
+                    Surface.ROTATION_90 -> -gy to gx
+                    Surface.ROTATION_180 -> -gx to -gy
+                    Surface.ROTATION_270 -> gy to -gx
+                    else -> gx to gy
+                }
+                roll = Math.toDegrees(kotlin.math.atan2(sx.toDouble(), sy.toDouble())).toFloat()
+            }
+            override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+        }
+        if (level && acc != null) sm.registerListener(listener, acc, SensorManager.SENSOR_DELAY_UI)
+        onDispose { sm.unregisterListener(listener) }
     }
 
     // ---------- Voice following ----------
@@ -288,9 +327,6 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             if (scroll.value >= scroll.maxValue && mode == ScrollMode.SPEED) scrolling = false
         }
     }
-    LaunchedEffect(recording) {
-        while (recording != null) { elapsed = System.currentTimeMillis() - recStart; delay(250) }
-    }
 
     fun startRecording() {
         val values = ContentValues().apply {
@@ -304,7 +340,11 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         lastVideo = null
         recording = videoCapture.output.prepareRecording(ctx, opts).withAudioEnabled()
             .start(ContextCompat.getMainExecutor(ctx)) { ev ->
+                elapsed = ev.recordingStats.recordedDurationNanos / 1_000_000
+                if (ev is VideoRecordEvent.Pause) paused = true
+                if (ev is VideoRecordEvent.Resume) paused = false
                 if (ev is VideoRecordEvent.Finalize) {
+                    paused = false
                     if (ev.hasError() && ev.error != VideoRecordEvent.Finalize.ERROR_SOURCE_INACTIVE) {
                         error = when (ev.error) {
                             VideoRecordEvent.Finalize.ERROR_INSUFFICIENT_STORAGE -> "Запис зупинено: на телефоні закінчилося місце"
@@ -320,7 +360,7 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
 
     fun onRecordPressed() {
         val r = recording
-        if (r != null) { r.stop(); scrolling = false; return }
+        if (r != null) { r.stop(); scrolling = false; paused = false; return }
         // A second tap during the countdown cancels it.
         if (countdown > 0) { countdownJob?.cancel(); countdownJob = null; countdown = 0; return }
         if (delaySec == 0) { startRecording(); return }
@@ -353,11 +393,32 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         onDispose { RemoteKeys.handler = null }
     }
 
-    if (sheet != Sheet.NONE) BackHandler { sheet = if (sheet == Sheet.EDIT) Sheet.SCRIPTS else Sheet.NONE }
+    if (sheet != Sheet.NONE) BackHandler { sheet = Sheet.NONE }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (granted) {
             AndroidView({ previewView }, Modifier.fillMaxSize())
+            if (grid) Canvas(Modifier.fillMaxSize()) {
+                val c = Color.White.copy(alpha = 0.35f)
+                for (k in 1..2) {
+                    drawLine(c, Offset(size.width * k / 3, 0f), Offset(size.width * k / 3, size.height), 1.5f)
+                    drawLine(c, Offset(0f, size.height * k / 3), Offset(size.width, size.height * k / 3), 1.5f)
+                }
+            }
+            if (level) {
+                val ok = kotlin.math.abs(roll) < 1.5f
+                val col = if (ok) Color(0xFF5BE37D) else Color.White
+                Canvas(Modifier.fillMaxSize()) {
+                    val cx = size.width / 2; val cy = size.height / 2
+                    val half = 70.dp.toPx(); val gap = 18.dp.toPx()
+                    // Fixed marks show where level is; the line turns with the phone and goes green when level.
+                    drawLine(col.copy(alpha = 0.7f), Offset(cx - half - gap - 24.dp.toPx(), cy), Offset(cx - half - gap, cy), 3f)
+                    drawLine(col.copy(alpha = 0.7f), Offset(cx + half + gap, cy), Offset(cx + half + gap + 24.dp.toPx(), cy), 3f)
+                    val a = Math.toRadians(-roll.toDouble())
+                    val dx = (kotlin.math.cos(a) * half).toFloat(); val dy = (kotlin.math.sin(a) * half).toFloat()
+                    drawLine(col, Offset(cx - dx, cy - dy), Offset(cx + dx, cy + dy), if (ok) 5f else 3f)
+                }
+            }
         } else {
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally) {
@@ -412,7 +473,7 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             if (recording != null) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(RecRed))
                 Spacer(Modifier.width(6.dp))
-                Text(formatTime(elapsed), color = Color.White, fontWeight = FontWeight.Bold)
+                Text(if (paused) "Пауза · ${formatTime(elapsed)}" else formatTime(elapsed), color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(12.dp))
             }
         }
@@ -448,7 +509,14 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.Start) {
-                    SmallToggle("Сценарії", false) { if (recording == null) { scrolling = false; sheet = Sheet.SCRIPTS } }
+                    val rec = recording
+                    if (rec != null) {
+                        SmallToggle(if (paused) "● Продовжити" else "❚❚ Пауза запису", paused) {
+                            if (paused) { rec.resume(); scrolling = true } else { rec.pause(); scrolling = false }
+                        }
+                    } else {
+                        SmallToggle("Сценарії", false) { scrolling = false; sheet = Sheet.SCRIPTS }
+                    }
                     SmallToggle("Налаштування", false) { if (recording == null) { scrolling = false; sheet = Sheet.SETTINGS } }
                     SmallToggle(if (showSliders) "Сховати повзунки" else "Повзунки", showSliders) { showSliders = !showSliders }
                 }
@@ -467,78 +535,13 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             }
         }
 
-        // ---------- Scripts list ----------
+        // ---------- Scripts ----------
         if (sheet == Sheet.SCRIPTS) {
-            var deleting by remember { mutableStateOf<Script?>(null) }
-            Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Сценарії", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { sheet = Sheet.NONE }) { Text("Закрити", color = Muted) }
-                }
-                Button(onClick = { editId = 0L; editText = ""; sheet = Sheet.EDIT }, modifier = Modifier.fillMaxWidth()) { Text("+ Новий сценарій") }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(scripts, key = { it.id }) { s ->
-                        val selected = s.id == currentId
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (selected) Line else Panel)
-                            .clickable { currentId = s.id; saveScripts(); scope.launch { scroll.scrollTo(0) }; sheet = Sheet.NONE }
-                            .padding(start = 14.dp, top = 6.dp, bottom = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(s.title, color = if (selected) CapYellow else Color.White, fontWeight = FontWeight.SemiBold)
-                                val n = s.text.split(Regex("\\s+")).count { it.isNotBlank() }
-                                Text("$n слів · ${readMinutes(s.text)} хв", color = Muted, fontSize = 12.sp)
-                            }
-                            TextButton(onClick = { editId = s.id; editText = s.text; sheet = Sheet.EDIT }) { Text("Змінити", color = Color.White) }
-                            if (scripts.size > 1) TextButton(onClick = { deleting = s }) { Text("✕", color = Muted) }
-                        }
-                    }
-                }
-            }
-            deleting?.let { s ->
-                AlertDialog(
-                    onDismissRequest = { deleting = null },
-                    title = { Text("Видалити сценарій?") },
-                    text = { Text("«${s.title}» буде видалено назавжди.") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            scripts.removeAll { it.id == s.id }
-                            if (currentId == s.id) currentId = scripts.first().id
-                            saveScripts(); deleting = null
-                        }) { Text("Видалити", color = RecRed) }
-                    },
-                    dismissButton = { TextButton(onClick = { deleting = null }) { Text("Скасувати") } },
-                )
-            }
-        }
-
-        // ---------- Script editor ----------
-        if (sheet == Sheet.EDIT) {
-            Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding().imePadding().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (editId == 0L) "Новий сценарій" else "Редагування", color = Color.White, fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { sheet = Sheet.SCRIPTS }) { Text("Скасувати", color = Muted) }
-                    Button(onClick = {
-                        if (editText.isNotBlank()) {
-                            if (editId == 0L) {
-                                val s = Script(System.currentTimeMillis(), editText)
-                                scripts.add(0, s); currentId = s.id
-                            } else {
-                                val i = scripts.indexOfFirst { it.id == editId }
-                                if (i >= 0) scripts[i] = scripts[i].copy(text = editText)
-                                currentId = editId
-                            }
-                            saveScripts()
-                            scope.launch { scroll.scrollTo(0) }
-                        }
-                        sheet = Sheet.NONE
-                    }) { Text("Готово") }
-                }
-                OutlinedTextField(value = editText, onValueChange = { editText = it }, modifier = Modifier.fillMaxWidth().weight(1f),
-                    placeholder = { Text("Вставте або напишіть сценарій. Перший рядок стане назвою.") })
-                Text("Слів: ${editText.split(Regex("\\s+")).count { it.isNotBlank() }} · приблизно ${readMinutes(editText)} хв читання",
-                    color = Muted, fontSize = 13.sp)
+            ScriptLibrary(prefs) {
+                scripts.clear(); scripts.addAll(prefs.scripts)
+                currentId = prefs.currentScriptId.takeIf { id -> scripts.any { it.id == id } } ?: scripts.first().id
+                scope.launch { scroll.scrollTo(0) }
+                sheet = Sheet.NONE
             }
         }
 
@@ -564,6 +567,10 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 mirror = mirror, onMirror = { mirror = it; prefs.mirror = it },
                 delaySec = delaySec, onDelay = { delaySec = it; prefs.delaySec = it },
                 remoteOn = remoteOn, onRemote = { remoteOn = it; prefs.remote = it },
+                quality = quality, onQuality = { quality = it; prefs.quality = it },
+                fps = fps, onFps = { fps = it; prefs.fps = it },
+                grid = grid, onGrid = { grid = it; prefs.grid = it },
+                level = level, onLevel = { level = it; prefs.level = it },
                 onClose = { sheet = Sheet.NONE },
             )
         }
@@ -580,6 +587,10 @@ private fun SettingsSheet(
     mirror: Boolean, onMirror: (Boolean) -> Unit,
     delaySec: Int, onDelay: (Int) -> Unit,
     remoteOn: Boolean, onRemote: (Boolean) -> Unit,
+    quality: String, onQuality: (String) -> Unit,
+    fps: Int, onFps: (Int) -> Unit,
+    grid: Boolean, onGrid: (Boolean) -> Unit,
+    level: Boolean, onLevel: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding().padding(16.dp)) {
@@ -608,6 +619,19 @@ private fun SettingsSheet(
                 }
                 Hint("Якщо телефон не дає слухати мікрофон одночасно із записом, прокрутка автоматично перейде на швидкість із повзунка.")
             }
+
+            Section("Якість відео")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("HD" to "HD 720p", "FHD" to "Full HD 1080p", "UHD" to "4K").forEach { (k, l) ->
+                    FilterChip(selected = quality == k, onClick = { onQuality(k) }, label = { Text(l) })
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(30, 60).forEach { f -> FilterChip(selected = fps == f, onClick = { onFps(f) }, label = { Text("$f кадрів/с") }) }
+            }
+            Hint("4K і 60 кадрів/с працюють не на всіх телефонах. Якщо камера їх не підтримує, додаток сам поверне простіший режим.")
+            SwitchLine("Сітка", "Лінії третин для рівної композиції", grid, onGrid)
+            SwitchLine("Рівень", "Лінія по центру зеленіє, коли телефон тримається рівно", level, onLevel)
 
             Section("Де показувати текст")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -672,10 +696,4 @@ fun SmallToggle(label: String, on: Boolean, onClick: () -> Unit) {
 fun formatTime(ms: Long): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
-}
-
-private fun readMinutes(text: String): String {
-    val words = text.split(Regex("\\s+")).count { it.isNotBlank() }
-    val min = words / 130f
-    return if (min < 1) "<1" else "%.1f".format(min)
 }

@@ -55,7 +55,7 @@ private val scheme = darkColorScheme(
     surfaceVariant = Line, onSurfaceVariant = Muted,
 )
 
-private enum class Screen { HOME, PROMPTER, SUBTITLES }
+private enum class Screen { HOME, OVERLAY, PROMPTER, SUBTITLES }
 
 /** Hardware buttons (volume keys, selfie remotes, headsets) handed to the screen that wants them. */
 object RemoteKeys {
@@ -90,14 +90,16 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize().background(Ink)) {
                     when (screen) {
                         Screen.HOME -> HomeScreen(
+                            onOverlay = { screen = Screen.OVERLAY },
                             onPrompter = { screen = Screen.PROMPTER },
                             onSubtitles = { screen = Screen.SUBTITLES },
                         )
+                        Screen.OVERLAY -> OverlayScreen(onBack = { screen = Screen.HOME })
                         Screen.PROMPTER -> {
                             BackHandler { screen = Screen.HOME }
                             TeleprompterScreen(
                                 onBack = { screen = Screen.HOME },
-                                onAddSubtitles = { uri: Uri -> subs.setVideo(uri); screen = Screen.SUBTITLES },
+                                onAddSubtitles = { uri: Uri -> subs.setVideo(uri, Prefs(this@MainActivity).currentScriptId); screen = Screen.SUBTITLES },
                             )
                         }
                         Screen.SUBTITLES -> {
@@ -112,7 +114,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HomeScreen(onPrompter: () -> Unit, onSubtitles: () -> Unit) {
+private fun HomeScreen(onOverlay: () -> Unit, onPrompter: () -> Unit, onSubtitles: () -> Unit) {
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -121,8 +123,18 @@ private fun HomeScreen(onPrompter: () -> Unit, onSubtitles: () -> Unit) {
         Text("Запис з телесуфлером і субтитри для ваших відео", color = Muted, fontSize = 16.sp)
         Spacer(Modifier.height(12.dp))
         HomeTile(
-            title = "Телесуфлер",
-            text = "Текст прокручується поверх камери, поки ви записуєте відео",
+            title = "Суфлер",
+            text = "Текст поверх будь-якого додатка: TikTok, Instagram, звичайної камери",
+            mark = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(3) { i -> Box(Modifier.size(if (i == 1) 26.dp else 20.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(if (i == 1) CapYellow else Color.White)) }
+                }
+            },
+            onClick = onOverlay,
+        )
+        HomeTile(
+            title = "Суфлер + камера",
+            text = "Своя камера з суфлером: прокрутка за голосом, пульт, пауза, 4K",
             mark = { Box(Modifier.size(22.dp).clip(CircleShape).background(RecRed)) },
             onClick = onPrompter,
         )
