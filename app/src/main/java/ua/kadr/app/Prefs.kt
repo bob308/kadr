@@ -25,9 +25,10 @@ class Prefs(context: Context) {
         get() = p.getBoolean("front", true)
         set(v) = p.edit().putBoolean("front", v).apply()
 
-    var countdown: Boolean
-        get() = p.getBoolean("countdown", true)
-        set(v) = p.edit().putBoolean("countdown", v).apply()
+    /** Seconds before recording starts: 0, 3, 5, 10 or 15. */
+    var delaySec: Int
+        get() = p.getInt("delay_sec", 3)
+        set(v) = p.edit().putInt("delay_sec", v).apply()
 
     var lang: SpeechLang
         get() = runCatching { SpeechLang.valueOf(p.getString("lang", "UK")!!) }.getOrDefault(SpeechLang.UK)

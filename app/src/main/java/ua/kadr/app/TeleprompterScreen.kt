@@ -116,7 +116,8 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     var font by remember { mutableFloatStateOf(prefs.fontSize) }
     var mirror by remember { mutableStateOf(prefs.mirror) }
     var front by remember { mutableStateOf(prefs.frontCamera) }
-    var countdownOn by remember { mutableStateOf(prefs.countdown) }
+    var delaySec by remember { mutableIntStateOf(prefs.delaySec) }
+    var countdownJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var editing by remember { mutableStateOf(false) }
     var scrolling by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
@@ -196,11 +197,12 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     fun onRecordPressed() {
         val r = recording
         if (r != null) { r.stop(); scrolling = false; return }
-        if (countdown > 0) return
-        if (!countdownOn) { startRecording(); return }
-        scope.launch {
+        // A second tap during the countdown cancels it.
+        if (countdown > 0) { countdownJob?.cancel(); countdownJob = null; countdown = 0; return }
+        if (delaySec == 0) { startRecording(); return }
+        countdownJob = scope.launch {
             scroll.scrollTo(0)
-            for (i in 3 downTo 1) { countdown = i; delay(1000) }
+            for (i in delaySec downTo 1) { countdown = i; delay(1000) }
             countdown = 0
             startRecording()
         }
@@ -251,8 +253,10 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         }
 
         if (countdown > 0) {
-            Text("$countdown", color = Color.White, fontSize = 120.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.align(Alignment.Center))
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("$countdown", color = Color.White, fontSize = 120.sp, fontWeight = FontWeight.Black)
+                Text("Торкніться кнопки запису, щоб скасувати", color = Color.White, fontSize = 14.sp)
+            }
         }
 
         // Bottom controls
@@ -287,7 +291,9 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 Column(horizontalAlignment = Alignment.End) {
                     SmallToggle(if (scrolling) "Пауза" else "Пуск", scrolling) { scrolling = !scrolling }
                     SmallToggle("Камера ⟲", false) { if (recording == null) { front = !front; prefs.frontCamera = front } }
-                    SmallToggle("Відлік 3с", countdownOn) { countdownOn = !countdownOn; prefs.countdown = countdownOn }
+                    SmallToggle(if (delaySec == 0) "Без відліку" else "Відлік ${delaySec}с", delaySec > 0) {
+                        delaySec = DELAYS[(DELAYS.indexOf(delaySec) + 1) % DELAYS.size]; prefs.delaySec = delaySec
+                    }
                 }
             }
         }
@@ -324,6 +330,8 @@ fun SmallToggle(label: String, on: Boolean, onClick: () -> Unit) {
         Text(label, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
     }
 }
+
+private val DELAYS = listOf(0, 3, 5, 10, 15)
 
 fun formatTime(ms: Long): String {
     val s = ms / 1000
