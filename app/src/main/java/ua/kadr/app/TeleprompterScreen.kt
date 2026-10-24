@@ -43,6 +43,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -1036,24 +1037,29 @@ fun formatTime(ms: Long): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
-/** Two-channel level meter in dBFS: green up to −12, yellow to −3, red above; a thin line holds each peak. */
+/** Two-channel level meter in dBFS, bars almost touching: green up to −12, yellow to −3, red above; thin lines hold the peaks. */
 @Composable
 private fun AudioMeter(levels: List<Float>, peaks: List<Float>, modifier: Modifier) {
-    Column(modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(1.5.dp)) {
-        levels.forEachIndexed { ch, lvl ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${ch + 1}", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, modifier = Modifier.width(10.dp))
-                Canvas(Modifier.width(120.dp).height(6.dp)) {
-                    fun x(db: Float) = ((db.coerceIn(-60f, 0f) + 60f) / 60f) * size.width
-                    drawRect(Color.White.copy(alpha = 0.15f), size = size)
-                    val lv = x(lvl); val g = x(-12f); val y = x(-3f)
-                    drawRect(Color(0xFF3DDC6A), topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(minOf(lv, g), size.height))
-                    if (lv > g) drawRect(CapYellow, topLeft = Offset(g, 0f), size = androidx.compose.ui.geometry.Size(minOf(lv, y) - g, size.height))
-                    if (lv > y) drawRect(RecRed, topLeft = Offset(y, 0f), size = androidx.compose.ui.geometry.Size(lv - y, size.height))
-                    val pk = peaks[ch]
-                    if (pk > -60f) drawLine(if (pk > -3f) RecRed else Color.White, Offset(x(pk), 0f), Offset(x(pk), size.height), 2.5f)
-                }
+    Box(modifier.clip(RoundedCornerShape(5.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 7.dp, vertical = 5.dp)) {
+        Canvas(Modifier.width(132.dp).height(13.dp)) {
+            val labelW = 10.dp.toPx()
+            val barH = 6.dp.toPx(); val gap = 1.dp.toPx()
+            val w = size.width - labelW
+            fun x(db: Float) = labelW + ((db.coerceIn(-60f, 0f) + 60f) / 60f) * w
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.argb(200, 255, 255, 255); textSize = 8.dp.toPx(); isAntiAlias = true
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            levels.forEachIndexed { ch, lvl ->
+                val top = ch * (barH + gap)
+                drawContext.canvas.nativeCanvas.drawText("${ch + 1}", 0f, top + barH - 0.5f, paint)
+                drawRect(Color.White.copy(alpha = 0.15f), topLeft = Offset(labelW, top), size = androidx.compose.ui.geometry.Size(w, barH))
+                val lv = x(lvl); val g = x(-12f); val y = x(-3f)
+                drawRect(Color(0xFF3DDC6A), topLeft = Offset(labelW, top), size = androidx.compose.ui.geometry.Size(minOf(lv, g) - labelW, barH))
+                if (lv > g) drawRect(CapYellow, topLeft = Offset(g, top), size = androidx.compose.ui.geometry.Size(minOf(lv, y) - g, barH))
+                if (lv > y) drawRect(RecRed, topLeft = Offset(y, top), size = androidx.compose.ui.geometry.Size(lv - y, barH))
+                val pk = peaks[ch]
+                if (pk > -60f) drawLine(if (pk > -3f) RecRed else Color.White, Offset(x(pk), top), Offset(x(pk), top + barH), 2.5f)
             }
         }
     }
