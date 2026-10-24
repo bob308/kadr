@@ -33,6 +33,8 @@ class Transcriber(private val context: Context) {
 
     private fun modelDir(lang: SpeechLang) = File(context.filesDir, "models/${lang.modelName}")
 
+    fun modelPath(lang: SpeechLang): String = modelDir(lang).absolutePath
+
     fun isModelReady(lang: SpeechLang): Boolean = File(modelDir(lang), "ready").exists()
 
     suspend fun downloadModel(lang: SpeechLang, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {

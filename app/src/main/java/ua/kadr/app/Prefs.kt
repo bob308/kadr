@@ -1,13 +1,50 @@
 package ua.kadr.app
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class Script(val id: Long, val text: String) {
+    val title: String
+        get() = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
+            ?.let { if (it.length > 40) it.take(40) + "…" else it } ?: "Без назви"
+}
+
+enum class ScrollMode(val label: String) { SPEED("За швидкістю"), VOICE("За голосом") }
+enum class PanelPos(val label: String) { TOP("Вгорі"), CENTER("По центру"), BOTTOM("Внизу") }
 
 class Prefs(context: Context) {
     private val p = context.getSharedPreferences("kadr", Context.MODE_PRIVATE)
 
-    var script: String
-        get() = p.getString("script", null) ?: SAMPLE_SCRIPT
-        set(v) = p.edit().putString("script", v).apply()
+    /** All saved scripts. The single text from version 1.0 becomes the first script. */
+    var scripts: List<Script>
+        get() {
+            val raw = p.getString("scripts", null)
+            if (raw == null) return listOf(Script(1L, p.getString("script", null) ?: SAMPLE_SCRIPT))
+            val arr = JSONArray(raw)
+            return (0 until arr.length()).map { arr.getJSONObject(it).let { o -> Script(o.getLong("id"), o.getString("text")) } }
+        }
+        set(list) {
+            val arr = JSONArray()
+            list.forEach { arr.put(JSONObject().put("id", it.id).put("text", it.text)) }
+            p.edit().putString("scripts", arr.toString()).apply()
+        }
+
+    var currentScriptId: Long
+        get() = p.getLong("current_script", 1L)
+        set(v) = p.edit().putLong("current_script", v).apply()
+
+    var scrollMode: ScrollMode
+        get() = runCatching { ScrollMode.valueOf(p.getString("scroll_mode", "SPEED")!!) }.getOrDefault(ScrollMode.SPEED)
+        set(v) = p.edit().putString("scroll_mode", v.name).apply()
+
+    var panelPos: PanelPos
+        get() = runCatching { PanelPos.valueOf(p.getString("panel_pos", "TOP")!!) }.getOrDefault(PanelPos.TOP)
+        set(v) = p.edit().putString("panel_pos", v.name).apply()
+
+    var remote: Boolean
+        get() = p.getBoolean("remote", true)
+        set(v) = p.edit().putBoolean("remote", v).apply()
 
     var speed: Float
         get() = p.getFloat("speed", 60f)
@@ -60,7 +97,7 @@ class Prefs(context: Context) {
 
     companion object {
         const val SAMPLE_SCRIPT = "Привіт! Це ваш телесуфлер.\n\n" +
-            "Натисніть «Текст», щоб вставити свій сценарій. Швидкість прокрутки й розмір шрифту налаштовуються повзунками внизу.\n\n" +
+            "Натисніть «Сценарії», щоб додати свої тексти. У «Налаштуваннях» можна ввімкнути прокрутку за голосом: текст сам іде за вашими словами.\n\n" +
             "Тримайте погляд біля камери: рядок, який треба читати, завжди на рівні жовтої позначки.\n\n" +
             "Після запису відео одразу можна відкрити в розділі «Субтитри» і додати до нього підписи."
     }

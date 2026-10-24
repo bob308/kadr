@@ -2,6 +2,7 @@ package ua.kadr.app
 
 import android.net.Uri
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -56,8 +57,29 @@ private val scheme = darkColorScheme(
 
 private enum class Screen { HOME, PROMPTER, SUBTITLES }
 
+/** Hardware buttons (volume keys, selfie remotes, headsets) handed to the screen that wants them. */
+object RemoteKeys {
+    var handler: ((Int) -> Boolean)? = null
+}
+
 @UnstableApi
 class MainActivity : ComponentActivity() {
+    private val consumed = mutableSetOf<Int>()
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val h = RemoteKeys.handler
+        if (h != null) {
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> {
+                    if (event.repeatCount > 0 && event.keyCode in consumed) return true
+                    if (h(event.keyCode)) { consumed += event.keyCode; return true }
+                }
+                KeyEvent.ACTION_UP -> if (consumed.remove(event.keyCode)) return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
