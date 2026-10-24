@@ -982,8 +982,8 @@ fun formatTime(ms: Long): String {
 /** Two-channel level meter in dBFS: green up to −12, yellow to −3, red above; a thin line holds each peak. */
 @Composable
 private fun AudioMeter(levels: List<Float>, peaks: List<Float>, modifier: Modifier) {
-    Column(modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(1.5.dp)) {
         levels.forEachIndexed { ch, lvl ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${ch + 1}", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, modifier = Modifier.width(10.dp))
