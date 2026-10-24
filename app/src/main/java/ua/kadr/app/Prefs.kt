@@ -87,6 +87,10 @@ class Prefs(context: Context) {
         get() = p.getBoolean("audio_meter", true)
         set(v) = p.edit().putBoolean("audio_meter", v).apply()
 
+    var highlight: Boolean
+        get() = p.getBoolean("highlight", true)
+        set(v) = p.edit().putBoolean("highlight", v).apply()
+
     var remote: Boolean
         get() = p.getBoolean("remote", true)
         set(v) = p.edit().putBoolean("remote", v).apply()

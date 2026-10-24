@@ -367,6 +367,38 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     }
 
     val tracking = follower?.tracking == true && !silenced
+
+    // ---------- Reading highlight ----------
+    var highlightOn by remember { mutableStateOf(prefs.highlight) }
+    // The line being read: with word tracking it follows your voice, otherwise it is the line at the yellow mark.
+    val readLine by remember(tracking, heardAt, layout, words) {
+        androidx.compose.runtime.derivedStateOf {
+            val l = layout ?: return@derivedStateOf -1
+            if (tracking && heardAt > 0 && words.starts.isNotEmpty())
+                l.getLineForOffset(words.starts[(heardAt - 1).coerceAtMost(words.starts.size - 1)])
+            else l.getLineForVerticalPosition(scroll.value.toFloat() + 2f)
+        }
+    }
+    val shownText = remember(script, readLine, highlightOn, tracking, heardAt, layout) {
+        val l = layout
+        if (!highlightOn || l == null || readLine < 0 || readLine >= l.lineCount) androidx.compose.ui.text.AnnotatedString(script)
+        else androidx.compose.ui.text.buildAnnotatedString {
+            append(script)
+            val lineStart = l.getLineStart(readLine).coerceAtMost(script.length)
+            val lineEnd = l.getLineEnd(readLine).coerceAtMost(script.length)
+            // Already read: dimmed.
+            addStyle(androidx.compose.ui.text.SpanStyle(color = Color.White.copy(alpha = 0.4f)), 0, lineStart)
+            if (tracking && heardAt > 0) {
+                // Word by word: everything said so far on this line turns yellow.
+                val idx = (heardAt - 1).coerceAtMost(words.starts.size - 1)
+                val wordEnd = Regex("\\S+").find(script, words.starts[idx])?.range?.last?.plus(1) ?: lineEnd
+                val to = wordEnd.coerceIn(lineStart, lineEnd)
+                addStyle(androidx.compose.ui.text.SpanStyle(color = CapYellow), lineStart, to)
+            } else {
+                addStyle(androidx.compose.ui.text.SpanStyle(color = CapYellow), lineStart, lineEnd)
+            }
+        }
+    }
     // Word tracking: bring the line with the next word to the reading mark.
     LaunchedEffect(heardAt, tracking) {
         if (!tracking || heardAt < 0 || words.starts.isEmpty()) return@LaunchedEffect
@@ -526,7 +558,7 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                             .graphicsLayer { if (mirror) scaleX = -1f }
                             .padding(start = 18.dp, end = 18.dp, top = panelH * 0.3f, bottom = panelH)
                     ) {
-                        Text(script, color = Color.White, fontSize = font.sp, lineHeight = (font * 1.3f).sp,
+                        Text(shownText, color = Color.White, fontSize = font.sp, lineHeight = (font * 1.3f).sp,
                             fontWeight = FontWeight.SemiBold, onTextLayout = { layout = it },
                             style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, Offset(0f, 2f), 6f)))
                     }
@@ -675,6 +707,8 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                             onClick = { remoteOn = !remoteOn; prefs.remote = remoteOn; showHint(if (remoteOn) "Пульт увімкнено: гучність + = пуск/пауза" else "Пульт вимкнено") })
                         IconTap(KIcons.Mic, active = mode == ScrollMode.VOICE, hint = "Прокрутка за голосом", onHint = ::showHint,
                             onClick = { sheet = Sheet.SETTINGS })
+                        IconTap(KIcons.Highlight, active = highlightOn, hint = "Підсвітка рядка, що читається", onHint = ::showHint,
+                            onClick = { highlightOn = !highlightOn; prefs.highlight = highlightOn })
                         IconTap(KIcons.Meter, active = meterOn, hint = "Індикатор гучності", onHint = ::showHint,
                             onClick = { meterOn = !meterOn; prefs.audioMeter = meterOn })
                         IconTap(KIcons.Gear, hint = "Усі налаштування", onHint = ::showHint, onClick = { sheet = Sheet.SETTINGS })

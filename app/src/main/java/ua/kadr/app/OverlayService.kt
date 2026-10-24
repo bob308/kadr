@@ -203,6 +203,17 @@ class OverlayService : Service() {
         }
         body.addView(resize, FrameLayout.LayoutParams(dp(36f), dp(36f)).apply { gravity = Gravity.END or Gravity.BOTTOM })
 
+        // Close button that never hides, top-right corner of the text.
+        val close = TextView(this).apply {
+            text = "✕"; setTextColor(Color.WHITE); textSize = 18f; gravity = Gravity.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xB3000000.toInt()) }
+            setOnClickListener { stopSelf() }
+        }
+        body.addView(close, FrameLayout.LayoutParams(dp(36f), dp(36f)).apply {
+            gravity = Gravity.END or Gravity.TOP; topMargin = dp(6f); rightMargin = dp(6f)
+        })
+
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply { cornerRadius = dp(14f).toFloat(); setColor(Color.TRANSPARENT) }

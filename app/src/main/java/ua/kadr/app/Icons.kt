@@ -64,6 +64,7 @@ object KIcons {
     val Reset = line("reset", "M4.5 12a7.5 7.5 0 1 0 2.2-5.3", "M4.5 4.5v4h4")
     val Mic = line("mic", "M9 5.5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0z", "M5.5 11.5a6.5 6.5 0 0 0 13 0", "M12 18v3")
     val Meter = line("meter", "M5 19v-4", "M9.5 19v-8", "M14 19v-12", "M18.5 19v-6", width = 2.2f)
+    val Highlight = line("highlight", "M4 20h16", "M7 15.5l7.5-11l4 2.7l-7.5 11l-4.5 0.8z", "M12.5 7.5l4 2.7")
     val Close = line("close", "M6 6l12 12", "M18 6L6 18", width = 2f)
     val Captions = line("captions", "M3 5h18v14H3z", "M6.5 13h5", "M13.5 13h4", "M6.5 16h3", "M11.5 16h6")
 }
