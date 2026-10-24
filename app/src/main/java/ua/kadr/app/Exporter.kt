@@ -14,7 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.OverlaySettings
-import androidx.media3.effect.StaticOverlaySettings
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.Effects
@@ -48,7 +48,7 @@ private class CaptionOverlay(
     private val cues: List<Cue>,
     private val style: CaptionStyle,
 ) : BitmapOverlay() {
-    private val settings = StaticOverlaySettings.Builder()
+    private val settings = OverlaySettings.Builder()
         .setBackgroundFrameAnchor(0f, style.position.y)
         .setOverlayFrameAnchor(0f, 0f)
         .build()
@@ -73,7 +73,7 @@ class Exporter(private val context: Context) {
     ) {
         val out = File(context.cacheDir, "kadr_export.mp4").apply { delete() }
         val overlay = CaptionOverlay(CaptionRenderer(info.width, info.height), cues, style)
-        val effects = Effects(emptyList(), listOf(OverlayEffect(ImmutableList.of(overlay))))
+        val effects = Effects(emptyList(), listOf(OverlayEffect(ImmutableList.of<TextureOverlay>(overlay))))
         val item = EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(effects).build()
 
         transformer = Transformer.Builder(context)

@@ -76,7 +76,7 @@ class CaptionRenderer(private val videoW: Int, private val videoH: Int) {
             CaptionLook.OUTLINE -> {
                 // Draw a black stroke version first, then the coloured text on top.
                 val strokePaint = TextPaint(paint).apply {
-                    style = Paint.Style.STROKE
+                    this.style = Paint.Style.STROKE
                     strokeWidth = textPx * 0.16f
                     strokeJoin = Paint.Join.ROUND
                     color = Color.BLACK
