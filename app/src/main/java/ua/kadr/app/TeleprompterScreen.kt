@@ -316,17 +316,20 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
 
     // ---------- Audio meter ----------
     var meterOn by remember { mutableStateOf(prefs.audioMeter) }
-    var levelDb by remember { mutableFloatStateOf(-90f) }
-    var peakDb by remember { mutableFloatStateOf(-90f) }
-    var peakAt by remember { mutableLongStateOf(0L) }
+    val levels = remember { mutableStateListOf(-90f, -90f) }  // left, right
+    val peaks = remember { mutableStateListOf(-90f, -90f) }
+    val peakAt = remember { longArrayOf(0L, 0L) }
     var quietSince by remember { mutableLongStateOf(0L) }
     var lastLoudHint by remember { mutableLongStateOf(0L) }
     val hintNow by rememberUpdatedState<(String) -> Unit>({ showHint(it) })
-    fun feedLevel(db: Float) {
+    fun feedLevel(dbL: Float, dbR: Float) {
         val now = System.currentTimeMillis()
-        // Fast attack, slow release, like a hardware meter.
-        levelDb = if (db > levelDb) db else maxOf(db, levelDb - 1.5f)
-        if (db >= peakDb || now - peakAt > 600) { peakDb = db; peakAt = now }
+        listOf(dbL, dbR).forEachIndexed { ch, d ->
+            // Fast attack, slow release, like a hardware meter.
+            levels[ch] = if (d > levels[ch]) d else maxOf(d, levels[ch] - 1.5f)
+            if (d >= peaks[ch] || now - peakAt[ch] > 600) { peaks[ch] = d; peakAt[ch] = now }
+        }
+        val db = maxOf(dbL, dbR)
         if (db > -45f) quietSince = now
         else if (quietSince == 0L) quietSince = now
         else if (now - quietSince > 4000) { hintNow("Тихо: підійдіть ближче до мікрофона"); quietSince = now }
@@ -339,20 +342,25 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         quietSince = 0L
         withContext(Dispatchers.IO) {
             val rec = try {
-                android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC, 16000,
-                    android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, 16000)
+                android.media.AudioRecord(android.media.MediaRecorder.AudioSource.CAMCORDER, 48000,
+                    android.media.AudioFormat.CHANNEL_IN_STEREO, android.media.AudioFormat.ENCODING_PCM_16BIT, 48000)
             } catch (e: Exception) { null } ?: return@withContext
             if (rec.state != android.media.AudioRecord.STATE_INITIALIZED) { rec.release(); return@withContext }
-            val buf = ShortArray(800) // 50 ms
+            val buf = ShortArray(4800) // 50 ms of interleaved left/right
             try {
                 rec.startRecording()
                 while (isActive) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) continue
-                    var peak = 0
-                    for (i in 0 until n) { val v = kotlin.math.abs(buf[i].toInt()); if (v > peak) peak = v }
-                    val db = if (peak == 0) -90f else (20 * kotlin.math.log10(peak / 32768.0)).toFloat()
-                    withContext(Dispatchers.Main) { feedLevel(db) }
+                    val stereo = rec.channelCount == 2
+                    var pl = 0; var pr = 0
+                    for (i in 0 until n) {
+                        val v = kotlin.math.abs(buf[i].toInt())
+                        if (!stereo || i % 2 == 0) { if (v > pl) pl = v } else if (v > pr) pr = v
+                    }
+                    if (!stereo) pr = pl
+                    fun toDb(p: Int) = if (p == 0) -90f else (20 * kotlin.math.log10(p / 32768.0)).toFloat()
+                    withContext(Dispatchers.Main) { feedLevel(toDb(pl), toDb(pr)) }
                 }
             } finally { runCatching { rec.stop() }; rec.release() }
         }
@@ -404,7 +412,9 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 elapsed = ev.recordingStats.recordedDurationNanos / 1_000_000
                 if (meterOn && ev is VideoRecordEvent.Status) {
                     val amp = ev.recordingStats.audioStats.audioAmplitude
-                    feedLevel(if (amp <= 0.0) -90f else (20 * kotlin.math.log10(amp)).toFloat())
+                    // The recorder reports one level for both channels.
+                    val d = if (amp <= 0.0) -90f else (20 * kotlin.math.log10(amp)).toFloat()
+                    feedLevel(d, d)
                 }
                 if (ev is VideoRecordEvent.Pause) paused = true
                 if (ev is VideoRecordEvent.Resume) paused = false
@@ -579,7 +589,7 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))))) {
                 // Sound level sits just above the controls, always in view.
-                if (meterActive) AudioMeter(levelDb, peakDb, Modifier.align(Alignment.End).padding(end = 12.dp, bottom = 6.dp, top = 8.dp))
+                if (meterActive) AudioMeter(levels.toList(), peaks.toList(), Modifier.align(Alignment.End).padding(end = 12.dp, bottom = 6.dp, top = 8.dp))
                 lastVideo?.let { uri ->
                     Row(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp).clip(RoundedCornerShape(20.dp))
                         .background(Color.Black.copy(alpha = 0.6f)).clickable { onAddSubtitles(uri) }
@@ -969,23 +979,25 @@ fun formatTime(ms: Long): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
-/** Level meter in dBFS: green up to −12, yellow to −3, red above; a thin line holds the recent peak. */
+/** Two-channel level meter in dBFS: green up to −12, yellow to −3, red above; a thin line holds each peak. */
 @Composable
-private fun AudioMeter(levelDb: Float, peakDb: Float, modifier: Modifier) {
-    Column(modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 5.dp),
-        horizontalAlignment = Alignment.End) {
-        Canvas(Modifier.width(110.dp).height(7.dp)) {
-            fun x(db: Float) = ((db.coerceIn(-60f, 0f) + 60f) / 60f) * size.width
-            drawRect(Color.White.copy(alpha = 0.15f), size = size)
-            val lv = x(levelDb)
-            val g = x(-12f); val y = x(-3f)
-            drawRect(Color(0xFF3DDC6A), topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(minOf(lv, g), size.height))
-            if (lv > g) drawRect(CapYellow, topLeft = Offset(g, 0f), size = androidx.compose.ui.geometry.Size(minOf(lv, y) - g, size.height))
-            if (lv > y) drawRect(RecRed, topLeft = Offset(y, 0f), size = androidx.compose.ui.geometry.Size(lv - y, size.height))
-            val px = x(peakDb)
-            if (peakDb > -60f) drawLine(if (peakDb > -3f) RecRed else Color.White, Offset(px, 0f), Offset(px, size.height), 2.5f)
+private fun AudioMeter(levels: List<Float>, peaks: List<Float>, modifier: Modifier) {
+    Column(modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        levels.forEachIndexed { ch, lvl ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${ch + 1}", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, modifier = Modifier.width(10.dp))
+                Canvas(Modifier.width(120.dp).height(6.dp)) {
+                    fun x(db: Float) = ((db.coerceIn(-60f, 0f) + 60f) / 60f) * size.width
+                    drawRect(Color.White.copy(alpha = 0.15f), size = size)
+                    val lv = x(lvl); val g = x(-12f); val y = x(-3f)
+                    drawRect(Color(0xFF3DDC6A), topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(minOf(lv, g), size.height))
+                    if (lv > g) drawRect(CapYellow, topLeft = Offset(g, 0f), size = androidx.compose.ui.geometry.Size(minOf(lv, y) - g, size.height))
+                    if (lv > y) drawRect(RecRed, topLeft = Offset(y, 0f), size = androidx.compose.ui.geometry.Size(lv - y, size.height))
+                    val pk = peaks[ch]
+                    if (pk > -60f) drawLine(if (pk > -3f) RecRed else Color.White, Offset(x(pk), 0f), Offset(x(pk), size.height), 2.5f)
+                }
+            }
         }
-        Text(if (levelDb <= -60f) "−∞ dB" else "${levelDb.toInt()} dB", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp,
-            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
     }
 }
