@@ -294,7 +294,8 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
 
     fun startRecording() {
         val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "Kadr_${System.currentTimeMillis()}")
+            put(MediaStore.Video.Media.DISPLAY_NAME, "Kadr_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             if (Build.VERSION.SDK_INT >= 29) put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Kadr")
         }
         val opts = MediaStoreOutputOptions.Builder(ctx.contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
@@ -305,7 +306,11 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             .start(ContextCompat.getMainExecutor(ctx)) { ev ->
                 if (ev is VideoRecordEvent.Finalize) {
                     if (ev.hasError() && ev.error != VideoRecordEvent.Finalize.ERROR_SOURCE_INACTIVE) {
-                        error = "Запис не вдався (код ${ev.error})"
+                        error = when (ev.error) {
+                            VideoRecordEvent.Finalize.ERROR_INSUFFICIENT_STORAGE -> "Запис зупинено: на телефоні закінчилося місце"
+                            VideoRecordEvent.Finalize.ERROR_INVALID_OUTPUT_OPTIONS -> "Не вдалося створити файл відео в галереї"
+                            else -> "Запис не вдався (код ${ev.error})"
+                        }
                     } else lastVideo = ev.outputResults.outputUri
                     recording = null
                 }
