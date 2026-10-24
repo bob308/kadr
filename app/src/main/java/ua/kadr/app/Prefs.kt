@@ -27,7 +27,7 @@ class Prefs(context: Context) {
 
     /** Seconds before recording starts: 0, 3, 5, 10 or 15. */
     var delaySec: Int
-        get() = p.getInt("delay_sec", 3)
+        get() = p.getInt("delay_sec", 15)
         set(v) = p.edit().putInt("delay_sec", v).apply()
 
     var lang: SpeechLang
