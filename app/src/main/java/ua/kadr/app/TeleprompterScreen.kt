@@ -40,6 +40,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -137,7 +141,8 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 private fun hasPerms(ctx: Context) = neededPerms
     .all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
-private enum class Sheet { NONE, SCRIPTS, SETTINGS }
+private enum class Sheet { NONE, SCRIPTS, SETTINGS, MEDIA }
+private enum class Drawer { NONE, SCRIPT, SPEED, FONT, CAMERA, TIMER, MORE }
 
 private val DELAYS = listOf(0, 3, 5, 10, 15)
 
@@ -179,6 +184,11 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     var grid by remember { mutableStateOf(prefs.grid) }
     var level by remember { mutableStateOf(prefs.level) }
     var paused by remember { mutableStateOf(false) }
+    var drawer by remember { mutableStateOf(Drawer.NONE) }
+    var textHidden by remember { mutableStateOf(false) }
+    var panelFrac by remember { mutableFloatStateOf(prefs.panelHeight) }
+    var hint by remember { mutableStateOf<String?>(null) }
+    var hintJob by remember { mutableStateOf<Job?>(null) }
 
     // Session state
     var sheet by remember { mutableStateOf(Sheet.NONE) }
@@ -194,6 +204,13 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var modelReady by remember { mutableStateOf(transcriber.isModelReady(lang)) }
     var downloadProgress by remember { mutableStateOf<Float?>(null) }
+
+    fun toggleDrawer(d: Drawer) { drawer = if (drawer == d) Drawer.NONE else d }
+    fun showHint(text: String) {
+        hint = text
+        hintJob?.cancel()
+        hintJob = scope.launch { delay(2200); hint = null }
+    }
 
     val isLandscapeNow = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val scroll = rememberScrollState()
@@ -395,147 +412,253 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
 
     if (sheet != Sheet.NONE) BackHandler { sheet = Sheet.NONE }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (granted) {
-            AndroidView({ previewView }, Modifier.fillMaxSize())
-            if (grid) Canvas(Modifier.fillMaxSize()) {
-                val c = Color.White.copy(alpha = 0.35f)
-                for (k in 1..2) {
-                    drawLine(c, Offset(size.width * k / 3, 0f), Offset(size.width * k / 3, size.height), 1.5f)
-                    drawLine(c, Offset(0f, size.height * k / 3), Offset(size.width, size.height * k / 3), 1.5f)
+    // ---------- Minimal pro-camera layout ----------
+    val previewArea: @Composable (Modifier) -> Unit = { mod ->
+        BoxWithConstraints(mod.background(Color.Black)) {
+            val areaH = maxHeight
+            if (granted) {
+                AndroidView({ previewView }, Modifier.fillMaxSize())
+                if (grid) Canvas(Modifier.fillMaxSize()) {
+                    val c = Color.White.copy(alpha = 0.35f)
+                    for (k in 1..2) {
+                        drawLine(c, Offset(size.width * k / 3, 0f), Offset(size.width * k / 3, size.height), 1.5f)
+                        drawLine(c, Offset(0f, size.height * k / 3), Offset(size.width, size.height * k / 3), 1.5f)
+                    }
+                }
+                if (level) {
+                    val ok = kotlin.math.abs(roll) < 1.5f
+                    val col = if (ok) Color(0xFF5BE37D) else Color.White
+                    Canvas(Modifier.fillMaxSize()) {
+                        val cx = size.width / 2; val cy = size.height / 2
+                        val half = 70.dp.toPx(); val gap = 18.dp.toPx()
+                        drawLine(col.copy(alpha = 0.7f), Offset(cx - half - gap - 24.dp.toPx(), cy), Offset(cx - half - gap, cy), 3f)
+                        drawLine(col.copy(alpha = 0.7f), Offset(cx + half + gap, cy), Offset(cx + half + gap + 24.dp.toPx(), cy), 3f)
+                        val a = Math.toRadians(-roll.toDouble())
+                        val dx = (kotlin.math.cos(a) * half).toFloat(); val dy = (kotlin.math.sin(a) * half).toFloat()
+                        drawLine(col, Offset(cx - dx, cy - dy), Offset(cx + dx, cy + dy), if (ok) 5f else 3f)
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Потрібен доступ до камери й мікрофона", color = Color.White, fontSize = 18.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { permLauncher.launch(neededPerms) }) { Text("Дозволити") }
                 }
             }
-            if (level) {
-                val ok = kotlin.math.abs(roll) < 1.5f
-                val col = if (ok) Color(0xFF5BE37D) else Color.White
-                Canvas(Modifier.fillMaxSize()) {
-                    val cx = size.width / 2; val cy = size.height / 2
-                    val half = 70.dp.toPx(); val gap = 18.dp.toPx()
-                    // Fixed marks show where level is; the line turns with the phone and goes green when level.
-                    drawLine(col.copy(alpha = 0.7f), Offset(cx - half - gap - 24.dp.toPx(), cy), Offset(cx - half - gap, cy), 3f)
-                    drawLine(col.copy(alpha = 0.7f), Offset(cx + half + gap, cy), Offset(cx + half + gap + 24.dp.toPx(), cy), 3f)
-                    val a = Math.toRadians(-roll.toDouble())
-                    val dx = (kotlin.math.cos(a) * half).toFloat(); val dy = (kotlin.math.sin(a) * half).toFloat()
-                    drawLine(col, Offset(cx - dx, cy - dy), Offset(cx + dx, cy + dy), if (ok) 5f else 3f)
+
+            // Prompter text: thin, see-through panel; height dragged by its handle.
+            val topBarH = 64.dp
+            if (!textHidden) {
+                val panelH = areaH * panelFrac
+                val align = when (panelPos) {
+                    PanelPos.TOP -> Alignment.TopCenter
+                    PanelPos.CENTER -> Alignment.Center
+                    PanelPos.BOTTOM -> Alignment.BottomCenter
                 }
+                Box(Modifier.align(align).fillMaxWidth()
+                    .padding(top = if (panelPos == PanelPos.TOP) topBarH else 0.dp,
+                        bottom = if (panelPos == PanelPos.BOTTOM && drawer != Drawer.NONE) 130.dp else 0.dp)
+                    .height(panelH)
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    .clickable(remember { MutableInteractionSource() }, null) { scrolling = !scrolling }
+                ) {
+                    Column(
+                        Modifier.fillMaxSize().verticalScroll(scroll)
+                            .graphicsLayer { if (mirror) scaleX = -1f }
+                            .padding(start = 18.dp, end = 18.dp, top = panelH * 0.3f, bottom = panelH)
+                    ) {
+                        Text(script, color = Color.White, fontSize = font.sp, lineHeight = (font * 1.3f).sp,
+                            fontWeight = FontWeight.SemiBold, onTextLayout = { layout = it },
+                            style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, Offset(0f, 2f), 6f)))
+                    }
+                    Box(Modifier.padding(top = panelH * 0.3f).width(4.dp).height((font * 1.3f).dp).background(CapYellow).align(Alignment.TopStart))
+                    // Resize handle
+                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(22.dp)
+                        .pointerInput(areaH) {
+                            detectVerticalDragGestures { _, dy ->
+                                val frac = (panelFrac + dy / areaH.toPx() * (if (panelPos == PanelPos.BOTTOM) -1 else 1)).coerceIn(0.12f, 0.75f)
+                                panelFrac = frac; prefs.panelHeight = frac
+                            }
+                        }, contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(40.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.6f)))
+                    }
+                }
+            }
+
+            // Top line: back, format badge, timecode, clips.
+            Row(Modifier.fillMaxWidth().statusBarsPadding().height(topBarH).padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                IconTap(KIcons.Back, onClick = { if (recording == null) onBack() })
+                Spacer(Modifier.weight(1f))
+                Column(Modifier.clip(RoundedCornerShape(5.dp)).background(Color.White).padding(horizontal = 6.dp, vertical = 1.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(qualityLabel(quality), color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Black, lineHeight = 14.sp)
+                    Text("${if (landscape) "16:9" else "9:16"} · $fps", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold, lineHeight = 10.sp)
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(timecode(elapsed), color = if (recording != null && !paused) RecRed else Color.White,
+                    fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
+                Spacer(Modifier.weight(1f))
+                IconTap(KIcons.Gallery, onClick = { if (recording == null) sheet = Sheet.MEDIA })
+            }
+
+            // Status pills under the top line.
+            Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = topBarH + 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (paused) Pill("ПАУЗА ЗАПИСУ", RecRed)
+                if (mode == ScrollMode.VOICE && scrolling) Pill(
+                    when {
+                        follower == null -> "Готую мікрофон…"
+                        silenced -> "Мікрофон зайнятий: прокрутка за швидкістю"
+                        speaking -> "● Слухаю"
+                        else -> "Чекаю на голос"
+                    }, if (speaking && !silenced) Color(0xFF5BE37D) else Color.White)
+                hint?.let { Pill(it, Color.White) }
+                error?.let { Pill(it, RecRed, onClick = { error = null }) }
+            }
+
+            if (countdown > 0) {
+                Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$countdown", color = Color.White, fontSize = 120.sp, fontWeight = FontWeight.Black,
+                        style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, Offset(0f, 3f), 12f)))
+                    Text("Натисніть запис ще раз, щоб скасувати", color = Color.White, fontSize = 13.sp)
+                }
+            }
+
+            // Drawer: transparent strip over the bottom of the frame.
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))))) {
+                lastVideo?.let { uri ->
+                    Row(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp).clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.6f)).clickable { onAddSubtitles(uri) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Збережено", color = Color.White, fontSize = 13.sp)
+                        Spacer(Modifier.width(10.dp))
+                        KIcon(KIcons.Captions, CapYellow, 18.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Субтитри", color = CapYellow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                when (drawer) {
+                    Drawer.NONE -> {}
+                    Drawer.SCRIPT -> DrawerRow(
+                        left = { IconTap(KIcons.Script, onClick = { sheet = Sheet.SCRIPTS }) },
+                        right = { IconTap(KIcons.Plus, onClick = { sheet = Sheet.SCRIPTS }) },
+                    ) {
+                        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)) {
+                            items(scripts, key = { it.id }) { sc ->
+                                OptionChip(sc.title, sc.id == currentId) {
+                                    currentId = sc.id; prefs.currentScriptId = sc.id
+                                    scope.launch { scroll.scrollTo(0) }
+                                }
+                            }
+                        }
+                    }
+                    Drawer.SPEED -> DrawerRow(
+                        left = { IconTap(if (scrolling) KIcons.Pause else KIcons.Play, onClick = { scrolling = !scrolling }) },
+                        right = {
+                            AutoBox(mode == ScrollMode.VOICE, "ГОЛОС") {
+                                mode = if (mode == ScrollMode.VOICE) ScrollMode.SPEED else ScrollMode.VOICE
+                                prefs.scrollMode = mode
+                                if (mode == ScrollMode.VOICE && !modelReady)
+                                    showHint("Текст іде, поки ви говорите. Для стеження за словами: ⋯ → ⚙ → модель")
+                            }
+                        },
+                    ) {
+                        RulerSlider(speed, 10f..200f, 5f, 4, { it.toInt().toString() }, { speed = it; prefs.speed = it })
+                    }
+                    Drawer.FONT -> Column {
+                        DrawerRow(
+                            left = { IconTap(if (textHidden) KIcons.EyeOff else KIcons.Eye, active = textHidden, onClick = { textHidden = !textHidden }) },
+                            right = { IconTap(KIcons.Mirror, active = mirror, onClick = { mirror = !mirror; prefs.mirror = mirror }) },
+                        ) {
+                            RulerSlider(font, 16f..60f, 1f, 5, { it.toInt().toString() }, { font = it; prefs.fontSize = it })
+                        }
+                        OptionsLine(PanelPos.entries.map { it.label }, PanelPos.entries.indexOf(panelPos)) {
+                            panelPos = PanelPos.entries[it]; prefs.panelPos = panelPos
+                        }
+                    }
+                    Drawer.CAMERA -> Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OptionsLine(listOf("Фронтальна", "Основна", "9:16", "16:9"),
+                            selected = setOf(if (front) 0 else 1, if (landscape) 3 else 2)) { i ->
+                            if (recording != null || countdown > 0) return@OptionsLine
+                            when (i) {
+                                0, 1 -> { front = i == 0; prefs.frontCamera = front }
+                                else -> { landscape = i == 3; prefs.landscape = landscape }
+                            }
+                        }
+                        OptionsLine(listOf("HD", "Full HD", "4K", "30", "60"),
+                            selected = setOf(listOf("HD", "FHD", "UHD").indexOf(quality), if (fps == 60) 4 else 3)) { i ->
+                            if (recording != null) return@OptionsLine
+                            when (i) {
+                                0, 1, 2 -> { quality = listOf("HD", "FHD", "UHD")[i]; prefs.quality = quality }
+                                else -> { fps = if (i == 4) 60 else 30; prefs.fps = fps }
+                            }
+                        }
+                    }
+                    Drawer.TIMER -> DrawerRow(left = { KIcon(KIcons.Timer, Color.White) }, right = {}) {
+                        OptionsLine(DELAYS.map { if (it == 0) "Вимк" else "$it с" }, DELAYS.indexOf(delaySec)) {
+                            delaySec = DELAYS[it]; prefs.delaySec = delaySec
+                        }
+                    }
+                    Drawer.MORE -> Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        IconTap(KIcons.Grid, active = grid, hint = "Сітка", onHint = ::showHint, onClick = { grid = !grid; prefs.grid = grid })
+                        IconTap(KIcons.Level, active = level, hint = "Рівень", onHint = ::showHint, onClick = { level = !level; prefs.level = level })
+                        IconTap(KIcons.Remote, active = remoteOn, hint = "Пульт і кнопки гучності", onHint = ::showHint,
+                            onClick = { remoteOn = !remoteOn; prefs.remote = remoteOn; showHint(if (remoteOn) "Пульт увімкнено: гучність + = пуск/пауза" else "Пульт вимкнено") })
+                        IconTap(KIcons.Mic, active = mode == ScrollMode.VOICE, hint = "Прокрутка за голосом", onHint = ::showHint,
+                            onClick = { sheet = Sheet.SETTINGS })
+                        IconTap(KIcons.Gear, hint = "Усі налаштування", onHint = ::showHint, onClick = { sheet = Sheet.SETTINGS })
+                    }
+                }
+            }
+        }
+    }
+
+    val toolbar: @Composable (Boolean) -> Unit = { vertical ->
+        val items: List<@Composable () -> Unit> = listOf(
+            {
+                val rec = recording
+                if (rec != null) IconTap(if (paused) KIcons.Play else KIcons.Pause, active = paused, hint = "Пауза запису", onHint = ::showHint) {
+                    if (paused) { rec.resume(); scrolling = true } else { rec.pause(); scrolling = false }
+                } else IconTap(KIcons.Script, active = drawer == Drawer.SCRIPT, hint = "Сценарій", onHint = ::showHint) { toggleDrawer(Drawer.SCRIPT) }
+            },
+            { IconTap(KIcons.Speed, active = drawer == Drawer.SPEED, hint = "Швидкість і пуск тексту", onHint = ::showHint) { toggleDrawer(Drawer.SPEED) } },
+            { TextTap("Aa", active = drawer == Drawer.FONT, hint = "Шрифт і панель тексту", onHint = ::showHint) { toggleDrawer(Drawer.FONT) } },
+            { RecordButton(recording != null, paused, countdown > 0, granted) { onRecordPressed() } },
+            { IconTap(KIcons.Flip, active = drawer == Drawer.CAMERA, hint = "Камера, орієнтація, якість", onHint = ::showHint) { toggleDrawer(Drawer.CAMERA) } },
+            { IconTap(KIcons.Timer, active = drawer == Drawer.TIMER || delaySec > 0, hint = "Відлік перед записом", onHint = ::showHint) { toggleDrawer(Drawer.TIMER) } },
+            { IconTap(KIcons.More, active = drawer == Drawer.MORE, hint = "Сітка, рівень, пульт, налаштування", onHint = ::showHint) { toggleDrawer(Drawer.MORE) } },
+        )
+        if (vertical) {
+            Column(Modifier.fillMaxHeight().width(84.dp).background(BarColor).navigationBarsPadding().padding(vertical = 10.dp),
+                verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally) {
+                items.reversed().forEach { it() }
             }
         } else {
-            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Потрібен доступ до камери й мікрофона", color = Color.White, fontSize = 18.sp)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { permLauncher.launch(neededPerms) }) { Text("Дозволити") }
+            Row(Modifier.fillMaxWidth().background(BarColor).navigationBarsPadding().height(96.dp).padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                items.forEach { it() }
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(BarColor)) {
+        if (isLandscapeNow) {
+            Row(Modifier.fillMaxSize()) {
+                previewArea(Modifier.weight(1f).fillMaxHeight())
+                toolbar(true)
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                previewArea(Modifier.weight(1f).fillMaxWidth())
+                toolbar(false)
             }
         }
 
-        // Prompter panel
-        val panelAlign = when (panelPos) {
-            PanelPos.TOP -> Alignment.TopCenter
-            PanelPos.CENTER -> Alignment.Center
-            PanelPos.BOTTOM -> Alignment.BottomCenter
-        }
-        val bottomGap = if (panelPos == PanelPos.BOTTOM) with(density) { controlsH.toDp() } else 0.dp
-        BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight(if (isLandscapeNow) 0.48f else 0.42f)
-            .align(panelAlign).padding(bottom = bottomGap)) {
-            val panelH = maxHeight
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
-                .clickable(remember { MutableInteractionSource() }, null) { scrolling = !scrolling }
-            ) {
-                Column(
-                    Modifier.fillMaxSize().verticalScroll(scroll)
-                        .graphicsLayer { if (mirror) scaleX = -1f }
-                        .padding(start = 20.dp, end = 20.dp, top = panelH * 0.35f, bottom = panelH)
-                ) {
-                    Text(script, color = Color.White, fontSize = font.sp, lineHeight = (font * 1.35f).sp,
-                        fontWeight = FontWeight.SemiBold, onTextLayout = { layout = it })
-                }
-                // Reading mark: the line next to it is the one to say now.
-                Box(Modifier.padding(top = panelH * 0.35f).width(6.dp).height((font * 1.35f).dp).background(CapYellow).align(Alignment.TopStart))
-            }
-        }
-
-        // Top bar
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { if (recording == null) onBack() }) { Text("‹ Назад", color = Color.White) }
-            Spacer(Modifier.weight(1f))
-            if (mode == ScrollMode.VOICE && scrolling) {
-                val label = when {
-                    follower == null -> "Готую мікрофон…"
-                    silenced -> "Мікрофон зайнятий записом: прокрутка за швидкістю"
-                    speaking -> "Слухаю"
-                    else -> "Чекаю на голос"
-                }
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (speaking && !silenced) Color(0xFF5BE37D) else Muted))
-                Spacer(Modifier.width(6.dp))
-                Text(label, color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f, fill = false))
-                Spacer(Modifier.width(12.dp))
-            }
-            if (recording != null) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(RecRed))
-                Spacer(Modifier.width(6.dp))
-                Text(if (paused) "Пауза · ${formatTime(elapsed)}" else formatTime(elapsed), color = Color.White, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(12.dp))
-            }
-        }
-
-        if (countdown > 0) {
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("$countdown", color = Color.White, fontSize = 120.sp, fontWeight = FontWeight.Black)
-                Text("Торкніться кнопки запису, щоб скасувати", color = Color.White, fontSize = 14.sp)
-            }
-        }
-
-        // Bottom controls
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { controlsH = it.height }
-                .background(Color.Black.copy(alpha = 0.6f)).navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            lastVideo?.let { uri ->
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel).padding(start = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("Відео збережено в галерею", color = Color.White, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { onAddSubtitles(uri) }) { Text("Додати субтитри", color = CapYellow) }
-                }
-                Spacer(Modifier.height(4.dp))
-            }
-            error?.let { Text(it, color = RecRed, modifier = Modifier.clickable { error = null }) }
-
-            if (showSliders) {
-                LabeledSlider("Швидкість", speed, 15f..200f) { speed = it; prefs.speed = it }
-                LabeledSlider("Шрифт", font, 18f..56f) { font = it; prefs.fontSize = it }
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.Start) {
-                    val rec = recording
-                    if (rec != null) {
-                        SmallToggle(if (paused) "● Продовжити" else "❚❚ Пауза запису", paused) {
-                            if (paused) { rec.resume(); scrolling = true } else { rec.pause(); scrolling = false }
-                        }
-                    } else {
-                        SmallToggle("Сценарії", false) { scrolling = false; sheet = Sheet.SCRIPTS }
-                    }
-                    SmallToggle("Налаштування", false) { if (recording == null) { scrolling = false; sheet = Sheet.SETTINGS } }
-                    SmallToggle(if (showSliders) "Сховати повзунки" else "Повзунки", showSliders) { showSliders = !showSliders }
-                }
-                Box(Modifier.size(76.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
-                    .clip(if (recording != null) RoundedCornerShape(8.dp) else CircleShape)
-                    .background(RecRed).clickable(enabled = granted) { onRecordPressed() })
-                Column(horizontalAlignment = Alignment.End) {
-                    SmallToggle(if (scrolling) "Пауза" else "Пуск", scrolling) { scrolling = !scrolling }
-                    SmallToggle("Камера ⟲", false) { if (recording == null) { front = !front; prefs.frontCamera = front } }
-                    OrientationButton(landscape) {
-                        if (recording == null && countdown == 0) {
-                            landscape = !landscape; prefs.landscape = landscape; showSliders = !landscape
-                        }
-                    }
-                }
-            }
-        }
-
-        // ---------- Scripts ----------
         if (sheet == Sheet.SCRIPTS) {
             ScriptLibrary(prefs) {
                 scripts.clear(); scripts.addAll(prefs.scripts)
@@ -544,8 +667,9 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 sheet = Sheet.NONE
             }
         }
-
-        // ---------- Settings ----------
+        if (sheet == Sheet.MEDIA) {
+            MediaScreen(onClose = { sheet = Sheet.NONE }, onSubtitles = { uri -> sheet = Sheet.NONE; onAddSubtitles(uri) })
+        }
         if (sheet == Sheet.SETTINGS) {
             SettingsSheet(
                 mode = mode, onMode = { mode = it; prefs.scrollMode = it },
@@ -574,6 +698,94 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 onClose = { sheet = Sheet.NONE },
             )
         }
+    }
+}
+
+private val BarColor = Color(0xFF0B0E14)
+
+private fun qualityLabel(q: String) = when (q) { "HD" -> "HD"; "UHD" -> "4K"; else -> "FHD" }
+
+private fun timecode(ms: Long): String {
+    val s = ms / 1000
+    return "%02d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60)
+}
+
+/** Icon button: tap acts, long press shows what it does. */
+@Composable
+private fun IconTap(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, active: Boolean = false,
+    hint: String? = null, onHint: (String) -> Unit = {}, onClick: () -> Unit,
+) {
+    Box(Modifier.size(48.dp).clip(CircleShape).pointerInput(hint) {
+        detectTapGestures(onTap = { onClick() }, onLongPress = { hint?.let(onHint) })
+    }, contentAlignment = Alignment.Center) {
+        KIcon(icon, if (active) CapYellow else Color.White, 26.dp)
+    }
+}
+
+@Composable
+private fun TextTap(label: String, active: Boolean, hint: String, onHint: (String) -> Unit, onClick: () -> Unit) {
+    Box(Modifier.size(48.dp).clip(CircleShape).pointerInput(hint) {
+        detectTapGestures(onTap = { onClick() }, onLongPress = { onHint(hint) })
+    }, contentAlignment = Alignment.Center) {
+        Text(label, color = if (active) CapYellow else Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun RecordButton(recording: Boolean, paused: Boolean, counting: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(72.dp).border(3.dp, if (recording) RecRed else Color.White, CircleShape).padding(7.dp)
+        .clip(if (recording) RoundedCornerShape(10.dp) else CircleShape)
+        .background(if (recording && !paused) RecRed else if (counting) RecRed.copy(alpha = 0.5f) else Color(0xFF7A1414))
+        .clickable(enabled = enabled, onClick = onClick))
+}
+
+@Composable
+private fun Pill(text: String, color: Color, onClick: (() -> Unit)? = null) {
+    Text(text, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.55f))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 12.dp, vertical = 5.dp))
+}
+
+/** A drawer line: icon on the left, the control in the middle, an action on the right. */
+@Composable
+private fun DrawerRow(left: @Composable () -> Unit, right: @Composable () -> Unit, center: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { left() }
+        Box(Modifier.weight(1f)) { center() }
+        Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) { right() }
+    }
+}
+
+@Composable
+private fun AutoBox(on: Boolean, label: String, onClick: () -> Unit) {
+    Column(Modifier.clip(RoundedCornerShape(6.dp)).background(if (on) CapYellow else Color.Transparent)
+        .clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("AUTO", color = if (on) Ink else Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+        Text(label, color = if (on) Ink else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun OptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(label, maxLines = 1, color = if (selected) Ink else Color.White, fontSize = 14.sp,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+            .background(if (selected) CapYellow else Color.Transparent)
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 9.dp))
+}
+
+@Composable
+private fun OptionsLine(labels: List<String>, selected: Int, onPick: (Int) -> Unit) =
+    OptionsLine(labels, setOf(selected), onPick)
+
+@Composable
+private fun OptionsLine(labels: List<String>, selected: Set<Int>, onPick: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically) {
+        labels.forEachIndexed { i, l -> OptionChip(l, i in selected) { onPick(i) } }
     }
 }
 

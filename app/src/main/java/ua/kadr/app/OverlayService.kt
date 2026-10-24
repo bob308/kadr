@@ -64,6 +64,11 @@ class OverlayService : Service() {
     private var speed = 60f    // dp per second
     private var fontSp = 26f
     private var lastFrame = 0L
+    private lateinit var header: View
+    private lateinit var body: FrameLayout
+    private val alphas = listOf(0x33, 0x66, 0x99, 0xCC)
+    private var alphaIdx = 1
+    private val hideHeader = Runnable { if (playing) header.animate().alpha(0f).setDuration(300).start() }
     private var carry = 0f
 
     private val frame = object : Choreographer.FrameCallback {
@@ -143,10 +148,10 @@ class OverlayService : Service() {
         // Header: drag handle and controls.
         playBtn = button("▶") { setPlaying(!playing) }
         speedLabel = TextView(this).apply { setTextColor(0xFF9AA0AE.toInt()); textSize = 12f; setPadding(dp(4f), 0, dp(4f), 0) }
-        val header = LinearLayout(this).apply {
+        header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xE61D2029.toInt())
+            setBackgroundColor(0xCC0B0E14.toInt())
             setPadding(dp(4f), 0, dp(4f), 0)
             addView(TextView(this@OverlayService).apply { text = "⠿"; setTextColor(0xFF9AA0AE.toInt()); textSize = 18f; setPadding(dp(6f), 0, dp(6f), 0) })
             addView(playBtn)
@@ -156,6 +161,7 @@ class OverlayService : Service() {
             addView(button("+") { changeSpeed(10f) })
             addView(button("A−") { changeFont(-2f) })
             addView(button("A+") { changeFont(2f) })
+            addView(button("◐") { alphaIdx = (alphaIdx + 1) % alphas.size; prefs.overlayAlpha = alphaIdx; applyAlpha() })
             addView(View(this@OverlayService), LinearLayout.LayoutParams(0, 1, 1f))
             addView(button("✕") { stopSelf() })
         }
@@ -165,6 +171,7 @@ class OverlayService : Service() {
             setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
             setLineSpacing(0f, 1.3f)
+            setShadowLayer(6f, 0f, 2f, Color.BLACK)
         }
         scroll = ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
@@ -175,15 +182,17 @@ class OverlayService : Service() {
         scroll.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> { downY = e.rawY; downT = System.currentTimeMillis() }
-                MotionEvent.ACTION_UP -> if (kotlin.math.abs(e.rawY - downY) < dp(8f) && System.currentTimeMillis() - downT < 300) setPlaying(!playing)
+                MotionEvent.ACTION_UP -> if (kotlin.math.abs(e.rawY - downY) < dp(8f) && System.currentTimeMillis() - downT < 300) {
+                    // A tap brings the controls back; a second tap toggles play.
+                    if (header.alpha < 0.5f) showHeader() else setPlaying(!playing)
+                }
             }
             false
         }
 
         // Reading mark on the left, a third of the way down.
         val mark = View(this).apply { setBackgroundColor(0xFFFFD43B.toInt()) }
-        val body = FrameLayout(this).apply {
-            setBackgroundColor(0xB3000000.toInt())
+        body = FrameLayout(this).apply {
             addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(mark, FrameLayout.LayoutParams(dp(5f), dp(30f)).apply { gravity = Gravity.START or Gravity.TOP })
         }
@@ -245,7 +254,8 @@ class OverlayService : Service() {
 
         root = container
         wm.addView(container, params)
-        applyFont(); updateSpeedLabel()
+        alphaIdx = prefs.overlayAlpha.coerceIn(0, alphas.size - 1)
+        applyFont(); updateSpeedLabel(); applyAlpha()
         container.post { padForReading(body.height) }
         body.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
             if (bottom - top != oldBottom - oldTop) padForReading(bottom - top)
@@ -269,9 +279,19 @@ class OverlayService : Service() {
         prefs.overlayW = params.width; prefs.overlayH = params.height
     }
 
+    private fun applyAlpha() { body.setBackgroundColor(alphas[alphaIdx] shl 24) }
+
+    /** Controls fade out 3 s after the text starts moving and come back on a tap. */
+    private fun showHeader() {
+        header.removeCallbacks(hideHeader)
+        header.animate().alpha(1f).setDuration(150).start()
+        header.postDelayed(hideHeader, 3000)
+    }
+
     private fun setPlaying(p: Boolean) {
         playing = p
         playBtn.text = if (p) "❚❚" else "▶"
+        showHeader()
         if (p) { lastFrame = 0L; Choreographer.getInstance().postFrameCallback(frame) }
     }
 

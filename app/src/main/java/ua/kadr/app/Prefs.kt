@@ -62,6 +62,9 @@ class Prefs(context: Context) {
     var overlayFont: Float
         get() = p.getFloat("ov_font", 26f)
         set(v) = p.edit().putFloat("ov_font", v).apply()
+    var overlayAlpha: Int
+        get() = p.getInt("ov_alpha", 1)
+        set(v) = p.edit().putInt("ov_alpha", v).apply()
     var overlayX: Int
         get() = p.getInt("ov_x", -1)
         set(v) = p.edit().putInt("ov_x", v).apply()
@@ -74,6 +77,11 @@ class Prefs(context: Context) {
     var overlayH: Int
         get() = p.getInt("ov_h", -1)
         set(v) = p.edit().putInt("ov_h", v).apply()
+
+    /** Prompter panel height as a share of the camera frame. */
+    var panelHeight: Float
+        get() = p.getFloat("panel_h", 0.3f)
+        set(v) = p.edit().putFloat("panel_h", v).apply()
 
     var remote: Boolean
         get() = p.getBoolean("remote", true)
