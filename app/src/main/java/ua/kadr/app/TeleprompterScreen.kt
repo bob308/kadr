@@ -552,11 +552,6 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 IconTap(KIcons.Gallery, onClick = { if (recording == null) sheet = Sheet.MEDIA })
             }
 
-            if (meterActive) {
-                AudioMeter(levelDb, peakDb, Modifier.align(Alignment.TopEnd).statusBarsPadding()
-                    .padding(top = topBarH + 2.dp, end = 12.dp))
-            }
-
             // Status pills under the top line.
             Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = topBarH + 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -583,6 +578,8 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             // Drawer: transparent strip over the bottom of the frame.
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))))) {
+                // Sound level sits just above the controls, always in view.
+                if (meterActive) AudioMeter(levelDb, peakDb, Modifier.align(Alignment.End).padding(end = 12.dp, bottom = 6.dp, top = 8.dp))
                 lastVideo?.let { uri ->
                     Row(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp).clip(RoundedCornerShape(20.dp))
                         .background(Color.Black.copy(alpha = 0.6f)).clickable { onAddSubtitles(uri) }

@@ -12,8 +12,8 @@ android {
         applicationId = "ua.kadr.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.5"
+        versionCode = 9
+        versionName = "1.5.1"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
