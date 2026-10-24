@@ -314,6 +314,50 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     }
     DisposableEffect(Unit) { onDispose { follower?.stop() } }
 
+    // ---------- Audio meter ----------
+    var meterOn by remember { mutableStateOf(prefs.audioMeter) }
+    var levelDb by remember { mutableFloatStateOf(-90f) }
+    var peakDb by remember { mutableFloatStateOf(-90f) }
+    var peakAt by remember { mutableLongStateOf(0L) }
+    var quietSince by remember { mutableLongStateOf(0L) }
+    var lastLoudHint by remember { mutableLongStateOf(0L) }
+    val hintNow by rememberUpdatedState<(String) -> Unit>({ showHint(it) })
+    fun feedLevel(db: Float) {
+        val now = System.currentTimeMillis()
+        // Fast attack, slow release, like a hardware meter.
+        levelDb = if (db > levelDb) db else maxOf(db, levelDb - 1.5f)
+        if (db >= peakDb || now - peakAt > 600) { peakDb = db; peakAt = now }
+        if (db > -45f) quietSince = now
+        else if (quietSince == 0L) quietSince = now
+        else if (now - quietSince > 4000) { hintNow("Тихо: підійдіть ближче до мікрофона"); quietSince = now }
+        if (db > -1.5f && now - lastLoudHint > 5000) { hintNow("Занадто гучно: звук може спотворитися"); lastLoudHint = now }
+    }
+    val meterActive = meterOn && granted
+    // Before recording the meter listens to the microphone itself; during recording it reads the recording.
+    LaunchedEffect(meterActive, recording == null, follower == null) {
+        if (!meterActive || recording != null || follower != null) return@LaunchedEffect
+        quietSince = 0L
+        withContext(Dispatchers.IO) {
+            val rec = try {
+                android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC, 16000,
+                    android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, 16000)
+            } catch (e: Exception) { null } ?: return@withContext
+            if (rec.state != android.media.AudioRecord.STATE_INITIALIZED) { rec.release(); return@withContext }
+            val buf = ShortArray(800) // 50 ms
+            try {
+                rec.startRecording()
+                while (isActive) {
+                    val n = rec.read(buf, 0, buf.size)
+                    if (n <= 0) continue
+                    var peak = 0
+                    for (i in 0 until n) { val v = kotlin.math.abs(buf[i].toInt()); if (v > peak) peak = v }
+                    val db = if (peak == 0) -90f else (20 * kotlin.math.log10(peak / 32768.0)).toFloat()
+                    withContext(Dispatchers.Main) { feedLevel(db) }
+                }
+            } finally { runCatching { rec.stop() }; rec.release() }
+        }
+    }
+
     val tracking = follower?.tracking == true && !silenced
     // Word tracking: bring the line with the next word to the reading mark.
     LaunchedEffect(heardAt, tracking) {
@@ -358,6 +402,10 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         recording = videoCapture.output.prepareRecording(ctx, opts).withAudioEnabled()
             .start(ContextCompat.getMainExecutor(ctx)) { ev ->
                 elapsed = ev.recordingStats.recordedDurationNanos / 1_000_000
+                if (meterOn && ev is VideoRecordEvent.Status) {
+                    val amp = ev.recordingStats.audioStats.audioAmplitude
+                    feedLevel(if (amp <= 0.0) -90f else (20 * kotlin.math.log10(amp)).toFloat())
+                }
                 if (ev is VideoRecordEvent.Pause) paused = true
                 if (ev is VideoRecordEvent.Resume) paused = false
                 if (ev is VideoRecordEvent.Finalize) {
@@ -504,6 +552,11 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 IconTap(KIcons.Gallery, onClick = { if (recording == null) sheet = Sheet.MEDIA })
             }
 
+            if (meterActive) {
+                AudioMeter(levelDb, peakDb, Modifier.align(Alignment.TopEnd).statusBarsPadding()
+                    .padding(top = topBarH + 2.dp, end = 12.dp))
+            }
+
             // Status pills under the top line.
             Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = topBarH + 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -611,6 +664,8 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                             onClick = { remoteOn = !remoteOn; prefs.remote = remoteOn; showHint(if (remoteOn) "Пульт увімкнено: гучність + = пуск/пауза" else "Пульт вимкнено") })
                         IconTap(KIcons.Mic, active = mode == ScrollMode.VOICE, hint = "Прокрутка за голосом", onHint = ::showHint,
                             onClick = { sheet = Sheet.SETTINGS })
+                        IconTap(KIcons.Meter, active = meterOn, hint = "Індикатор гучності", onHint = ::showHint,
+                            onClick = { meterOn = !meterOn; prefs.audioMeter = meterOn })
                         IconTap(KIcons.Gear, hint = "Усі налаштування", onHint = ::showHint, onClick = { sheet = Sheet.SETTINGS })
                     }
                 }
@@ -908,4 +963,25 @@ fun SmallToggle(label: String, on: Boolean, onClick: () -> Unit) {
 fun formatTime(ms: Long): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
+}
+
+/** Level meter in dBFS: green up to −12, yellow to −3, red above; a thin line holds the recent peak. */
+@Composable
+private fun AudioMeter(levelDb: Float, peakDb: Float, modifier: Modifier) {
+    Column(modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.End) {
+        Canvas(Modifier.width(110.dp).height(7.dp)) {
+            fun x(db: Float) = ((db.coerceIn(-60f, 0f) + 60f) / 60f) * size.width
+            drawRect(Color.White.copy(alpha = 0.15f), size = size)
+            val lv = x(levelDb)
+            val g = x(-12f); val y = x(-3f)
+            drawRect(Color(0xFF3DDC6A), topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(minOf(lv, g), size.height))
+            if (lv > g) drawRect(CapYellow, topLeft = Offset(g, 0f), size = androidx.compose.ui.geometry.Size(minOf(lv, y) - g, size.height))
+            if (lv > y) drawRect(RecRed, topLeft = Offset(y, 0f), size = androidx.compose.ui.geometry.Size(lv - y, size.height))
+            val px = x(peakDb)
+            if (peakDb > -60f) drawLine(if (peakDb > -3f) RecRed else Color.White, Offset(px, 0f), Offset(px, size.height), 2.5f)
+        }
+        Text(if (levelDb <= -60f) "−∞ dB" else "${levelDb.toInt()} dB", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp,
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
+    }
 }

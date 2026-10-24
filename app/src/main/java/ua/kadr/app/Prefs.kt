@@ -83,6 +83,10 @@ class Prefs(context: Context) {
         get() = p.getFloat("panel_h", 0.3f)
         set(v) = p.edit().putFloat("panel_h", v).apply()
 
+    var audioMeter: Boolean
+        get() = p.getBoolean("audio_meter", true)
+        set(v) = p.edit().putBoolean("audio_meter", v).apply()
+
     var remote: Boolean
         get() = p.getBoolean("remote", true)
         set(v) = p.edit().putBoolean("remote", v).apply()
