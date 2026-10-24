@@ -784,12 +784,19 @@ private fun TextTap(label: String, active: Boolean, hint: String, onHint: (Strin
     }
 }
 
+/**
+ * Not recording: white disc with a small red dot. Recording: one big red disc.
+ * Paused: the big disc dims. Counting down: the dot grows halfway.
+ */
 @Composable
 private fun RecordButton(recording: Boolean, paused: Boolean, counting: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    Box(Modifier.size(72.dp).border(3.dp, if (recording) RecRed else Color.White, CircleShape).padding(7.dp)
-        .clip(if (recording) RoundedCornerShape(10.dp) else CircleShape)
-        .background(if (recording && !paused) RecRed else if (counting) RecRed.copy(alpha = 0.5f) else Color(0xFF7A1414))
-        .clickable(enabled = enabled, onClick = onClick))
+    val dot by androidx.compose.animation.core.animateDpAsState(
+        when { recording -> 72.dp; counting -> 40.dp; else -> 24.dp }, label = "rec")
+    Box(Modifier.size(72.dp).clip(CircleShape)
+        .background(if (recording) Color.Transparent else Color.White)
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(dot).clip(CircleShape).background(if (recording && paused) RecRed.copy(alpha = 0.45f) else RecRed))
+    }
 }
 
 @Composable
