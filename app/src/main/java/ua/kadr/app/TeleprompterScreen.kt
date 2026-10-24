@@ -453,7 +453,7 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 Column(horizontalAlignment = Alignment.End) {
                     SmallToggle(if (scrolling) "Пауза" else "Пуск", scrolling) { scrolling = !scrolling }
                     SmallToggle("Камера ⟲", false) { if (recording == null) { front = !front; prefs.frontCamera = front } }
-                    SmallToggle(if (landscape) "▭ Горизонтально" else "▯ Вертикально", false) {
+                    OrientationButton(landscape) {
                         if (recording == null && countdown == 0) {
                             landscape = !landscape; prefs.landscape = landscape; showSliders = !landscape
                         }
@@ -646,10 +646,21 @@ private fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPoin
     }
 }
 
+/** A drawn frame (tall or wide) with its aspect ratio, so the button reads at a glance. */
+@Composable
+private fun OrientationButton(landscape: Boolean, onClick: () -> Unit) {
+    TextButton(onClick = onClick, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
+        Box(Modifier.size(if (landscape) 20.dp else 13.dp, if (landscape) 13.dp else 20.dp)
+            .border(2.dp, Color.White, RoundedCornerShape(3.dp)))
+        Spacer(Modifier.width(8.dp))
+        Text(if (landscape) "16:9" else "9:16", fontSize = 14.sp, maxLines = 1)
+    }
+}
+
 @Composable
 fun SmallToggle(label: String, on: Boolean, onClick: () -> Unit) {
     TextButton(onClick = onClick, colors = ButtonDefaults.textButtonColors(contentColor = if (on) CapYellow else Color.White)) {
-        Text(label, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
+        Text(label, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
     }
 }
 
