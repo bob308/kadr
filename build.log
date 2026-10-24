@@ -1,0 +1,68 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseNativeLibs
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:checkReleaseDuplicateClasses
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libimage_processing_util_jni.so, libjnidispatch.so, libsurface_util_jni.so, libvosk.so.
+
+> Task :app:generateReleaseResValues
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:parseReleaseLocalResources
+> Task :app:mergeReleaseResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:processReleaseManifestForPackage
+> Task :app:javaPreCompileRelease
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :app:mergeReleaseShaders
+> Task :app:mergeReleaseArtProfile
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:processReleaseResources
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:optimizeReleaseResources
+> Task :app:mergeExtDexRelease
+
+> Task :app:compileReleaseKotlin FAILED
+e: file:///home/runner/work/kadr/kadr/app/src/main/java/ua/kadr/app/CaptionRenderer.kt:79:21 'val' cannot be reassigned.
+e: file:///home/runner/work/kadr/kadr/app/src/main/java/ua/kadr/app/CaptionRenderer.kt:79:29 Assignment type mismatch: actual type is 'android.graphics.Paint.Style', but 'ua.kadr.app.CaptionStyle' was expected.
+e: file:///home/runner/work/kadr/kadr/app/src/main/java/ua/kadr/app/Exporter.kt:17:31 Unresolved reference 'StaticOverlaySettings'.
+e: file:///home/runner/work/kadr/kadr/app/src/main/java/ua/kadr/app/Exporter.kt:51:28 Unresolved reference 'StaticOverlaySettings'.
+e: file:///home/runner/work/kadr/kadr/app/src/main/java/ua/kadr/app/Exporter.kt:76:65 Java type mismatch: expected 'kotlin.collections.(Mutable)List<androidx.media3.effect.TextureOverlay>' but found 'com.google.common.collect.ImmutableList<ua.kadr.app.CaptionOverlay!>!'. Use explicit cast.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1792826935105.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileReleaseKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 30s
+35 actionable tasks: 35 executed
