@@ -2,7 +2,13 @@ package ua.kadr.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ContentValues
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.view.Surface
+import androidx.compose.ui.platform.LocalConfiguration
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -94,6 +100,12 @@ private val neededPerms: Array<String> = buildList {
     if (Build.VERSION.SDK_INT < 29) add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
 }.toTypedArray()
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 private fun hasPerms(ctx: Context) = neededPerms
     .all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
@@ -117,6 +129,9 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
     var mirror by remember { mutableStateOf(prefs.mirror) }
     var front by remember { mutableStateOf(prefs.frontCamera) }
     var delaySec by remember { mutableIntStateOf(prefs.delaySec) }
+    var landscape by remember { mutableStateOf(prefs.landscape) }
+    var showSliders by remember { mutableStateOf(!prefs.landscape) }
+    val isLandscapeNow = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var countdownJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var editing by remember { mutableStateOf(false) }
     var scrolling by remember { mutableStateOf(false) }
@@ -139,11 +154,25 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
         )
     }
 
-    LaunchedEffect(granted, front) {
+    // Lock the screen to the chosen orientation; the video is recorded the same way.
+    DisposableEffect(landscape) {
+        val act = ctx.findActivity()
+        act?.requestedOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        onDispose { }
+    }
+    DisposableEffect(Unit) {
+        onDispose { ctx.findActivity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
+
+    LaunchedEffect(granted, front, isLandscapeNow) {
         if (!granted) return@LaunchedEffect
         try {
             val provider = ctx.cameraProvider()
-            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+            delay(150) // let the view settle after a rotation
+            val rotation = previewView.display?.rotation ?: Surface.ROTATION_0
+            videoCapture.targetRotation = rotation
+            val preview = Preview.Builder().setTargetRotation(rotation).build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
             val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
             provider.unbindAll()
             provider.bindToLifecycle(lifecycleOwner, selector, preview, videoCapture)
@@ -276,13 +305,16 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
             }
             error?.let { Text(it, color = RecRed, modifier = Modifier.clickable { error = null }) }
 
-            LabeledSlider("Швидкість", speed, 15f..200f) { speed = it; prefs.speed = it }
-            LabeledSlider("Шрифт", font, 18f..56f) { font = it; prefs.fontSize = it }
+            if (showSliders) {
+                LabeledSlider("Швидкість", speed, 15f..200f) { speed = it; prefs.speed = it }
+                LabeledSlider("Шрифт", font, 18f..56f) { font = it; prefs.fontSize = it }
+            }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.Start) {
                     SmallToggle("Текст", false) { if (recording == null) { scrolling = false; editing = true } }
                     SmallToggle("Дзеркало", mirror) { mirror = !mirror; prefs.mirror = mirror }
+                    SmallToggle(if (showSliders) "Сховати повзунки" else "Швидкість/шрифт", showSliders) { showSliders = !showSliders }
                 }
                 // Record button
                 Box(Modifier.size(76.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
@@ -291,6 +323,11 @@ fun TeleprompterScreen(onBack: () -> Unit, onAddSubtitles: (Uri) -> Unit) {
                 Column(horizontalAlignment = Alignment.End) {
                     SmallToggle(if (scrolling) "Пауза" else "Пуск", scrolling) { scrolling = !scrolling }
                     SmallToggle("Камера ⟲", false) { if (recording == null) { front = !front; prefs.frontCamera = front } }
+                    SmallToggle(if (landscape) "▭ Горизонтально" else "▯ Вертикально", false) {
+                        if (recording == null && countdown == 0) {
+                            landscape = !landscape; prefs.landscape = landscape; showSliders = !landscape
+                        }
+                    }
                     SmallToggle(if (delaySec == 0) "Без відліку" else "Відлік ${delaySec}с", delaySec > 0) {
                         delaySec = DELAYS[(DELAYS.indexOf(delaySec) + 1) % DELAYS.size]; prefs.delaySec = delaySec
                     }

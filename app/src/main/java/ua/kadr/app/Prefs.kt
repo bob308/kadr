@@ -25,6 +25,10 @@ class Prefs(context: Context) {
         get() = p.getBoolean("front", true)
         set(v) = p.edit().putBoolean("front", v).apply()
 
+    var landscape: Boolean
+        get() = p.getBoolean("landscape", false)
+        set(v) = p.edit().putBoolean("landscape", v).apply()
+
     /** Seconds before recording starts: 0, 3, 5, 10 or 15. */
     var delaySec: Int
         get() = p.getInt("delay_sec", 15)
